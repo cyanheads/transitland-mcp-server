@@ -1,0 +1,45 @@
+{
+  "manifest_version": "0.3",
+  "name": "transitland-mcp-server",
+  "version": "0.1.0",
+  "description": "Global transit data via the Transitland v2 registry — operators, GTFS/GTFS-RT/GBFS feeds with license terms, routes, stops, and real-time-aware departures via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "cyanheads"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cyanheads/transitland-mcp-server"
+  },
+  "homepage": "https://github.com/cyanheads/transitland-mcp-server#readme",
+  "license": "Apache-2.0",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "MCP_AUTH_MODE": "none",
+        "NODE_ENV": "production",
+        "TRANSITLAND_API_KEY": "${user_config.TRANSITLAND_API_KEY}"
+      }
+    }
+  },
+  "compatibility": {
+    "runtimes": {
+      "node": ">=24.0.0"
+    }
+  },
+  "tools_generated": true,
+  "prompts_generated": true,
+  "user_config": {
+    "TRANSITLAND_API_KEY": {
+      "type": "string",
+      "title": "Transitland API Key",
+      "description": "Required. Transitland v2 API key, sent as the apikey query parameter. Get one at the Transitland developer portal (transit.land).",
+      "required": true,
+      "sensitive": true
+    }
+  }
+}

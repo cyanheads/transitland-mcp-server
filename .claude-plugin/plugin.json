@@ -1,0 +1,21 @@
+{
+  "name": "transitland-mcp-server",
+  "version": "0.1.0",
+  "description": "Global transit data via the Transitland v2 registry — operators, GTFS/GTFS-RT/GBFS feeds with license terms, routes, stops, and real-time-aware departures via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "cyanheads"
+  },
+  "homepage": "https://github.com/cyanheads/transitland-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/transitland-mcp-server",
+  "license": "Apache-2.0",
+  "mcpServers": {
+    "transitland-mcp-server": {
+      "command": "npx",
+      "args": ["-y", "@cyanheads/transitland-mcp-server"],
+      "env": {
+        "MCP_TRANSPORT_TYPE": "stdio",
+        "TRANSITLAND_API_KEY": "${TRANSITLAND_API_KEY}"
+      }
+    }
+  }
+}

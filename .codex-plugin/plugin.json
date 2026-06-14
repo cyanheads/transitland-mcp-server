@@ -1,0 +1,25 @@
+{
+  "name": "transitland-mcp-server",
+  "version": "0.1.0",
+  "description": "Global transit data via the Transitland v2 registry — operators, GTFS/GTFS-RT/GBFS feeds with license terms, routes, stops, and real-time-aware departures via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "cyanheads",
+    "email": "casey@caseyjhand.com",
+    "url": "https://github.com/cyanheads"
+  },
+  "homepage": "https://github.com/cyanheads/transitland-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/transitland-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": ["mcp", "mcp-server", "model-context-protocol", "transit", "gtfs", "transitland"],
+  "mcpServers": "./.codex-plugin/mcp.json",
+  "interface": {
+    "displayName": "transitland-mcp-server",
+    "shortDescription": "Global transit feeds, routes, stops, and real-time-aware departures via the Transitland v2 registry.",
+    "longDescription": "Wraps the Transitland v2 REST API — the open registry aggregating GTFS, GTFS-Realtime, and GBFS feeds from thousands of transit operators worldwide. Find operators by place, discover open-data feeds with their fetch URLs and license terms, locate routes and stops, and pull departures that distinguish live GTFS-Realtime predictions from static schedule. Onestop IDs are the identifier spine.",
+    "developerName": "cyanheads",
+    "category": "data",
+    "capabilities": ["Read"],
+    "websiteURL": "https://github.com/cyanheads/transitland-mcp-server",
+    "defaultPrompt": []
+  }
+}
