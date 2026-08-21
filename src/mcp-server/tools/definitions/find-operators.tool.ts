@@ -159,14 +159,14 @@ export const findOperatorsTool = tool('transitland_find_operators', {
   errors: [
     {
       reason: 'no_filter',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'No search, coordinates, bbox, onestop_id, or place filter was provided (server-enforced guard — the API accepts unfiltered requests but returns a paginated global dump).',
       recovery:
         'Provide at least one of: search, lat+lon, bbox, onestop_id, or adm0_name. For a place, geocode it with openstreetmap_geocode first.',
     },
     {
       reason: 'incomplete_point',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'lat without lon or lon without lat.',
       recovery: 'Provide both lat and lon together, or use bbox instead for an area.',
     },
@@ -182,7 +182,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
 
   async handler(input, ctx) {
     if ((input.lat === undefined) !== (input.lon === undefined)) {
-      throw ctx.fail('incomplete_point', undefined, { ...ctx.recoveryFor('incomplete_point') });
+      throw ctx.fail('incomplete_point', undefined, ctx.recoveryFor('incomplete_point'));
     }
     const hasPoint = input.lat !== undefined && input.lon !== undefined;
     const hasFilter =
@@ -193,7 +193,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       !!input.adm0_name ||
       !!input.adm1_name;
     if (!hasFilter) {
-      throw ctx.fail('no_filter', undefined, { ...ctx.recoveryFor('no_filter') });
+      throw ctx.fail('no_filter', undefined, ctx.recoveryFor('no_filter'));
     }
 
     const params: Record<string, string | number | boolean | undefined> = {

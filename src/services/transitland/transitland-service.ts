@@ -342,6 +342,9 @@ export class TransitlandService {
    * HTTP 404 for an absent `/operators/{key}` or `/feeds/{key}`, so the 404 is
    * mapped to the same clean, contract-carrying NotFound the empty-record-array
    * branch produces (naming the caller's ID, not the internal endpoint path).
+   *
+   * `expectedStatuses` marks statuses the caller treats as outcomes rather than
+   * failures (a 404 mapped to not-found/null), dropping them to debug-level logs.
    */
   private request<T>(
     path: string,
@@ -349,16 +352,14 @@ export class TransitlandService {
     ctx: Context,
     operation: string,
     notFoundLookup?: NotFoundLookup,
+    expectedStatuses?: number[],
   ): Promise<T> {
     const url = this.buildUrl(path, params);
+    // Child context under the handler's own — inherits requestId/traceId/
+    // tenantId/sessionId/spanId, relabeled with the upstream operation name.
     const reqCtx = requestContextService.createRequestContext({
       operation,
-      parentContext: {
-        requestId: ctx.requestId,
-        traceId: ctx.traceId,
-        tenantId: ctx.tenantId,
-        timestamp: new Date().toISOString(),
-      },
+      parentContext: ctx,
     });
     return withRetry(
       async () => {
@@ -367,6 +368,7 @@ export class TransitlandService {
           response = await fetchWithTimeout(url, FETCH_TIMEOUT_MS, reqCtx, {
             signal: ctx.signal,
             headers: { accept: 'application/json' },
+            ...(expectedStatuses && { expectedStatuses }),
           });
         } catch (err) {
           throw this.classifyFetchError(err, path, notFoundLookup);
@@ -504,6 +506,7 @@ export class TransitlandService {
       ctx,
       'transitland.getOperator',
       lookup,
+      [404],
     );
     const raw = body.operators?.[0];
     if (!raw) throw this.notFoundFor(lookup);
@@ -539,6 +542,8 @@ export class TransitlandService {
         { 'feed_versions.limit': 1 },
         ctx,
         'transitland.getFeed',
+        undefined,
+        [404],
       );
       return body.feeds?.[0] ?? null;
     } catch (err) {

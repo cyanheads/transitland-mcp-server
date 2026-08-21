@@ -95,7 +95,7 @@ describe('TransitlandService.listOperators', () => {
 
     expect(page.after).toBe(14356265);
     expect(page.items).toHaveLength(1);
-    const op = page.items[0];
+    const op = page.items[0]!;
     expect(op.onestopId).toBe('o-9q9-bart');
     expect(op.wikidataId).toBe('Q610120');
     // Duplicate places collapse to one.
@@ -105,7 +105,7 @@ describe('TransitlandService.listOperators', () => {
     expect(op.feeds.map((f) => f.spec)).toEqual(['GTFS', 'GTFS_RT']);
 
     // The apikey rides on the request URL but meta.next is never surfaced.
-    const calledUrl = fetchMock.mock.calls[0][0] as string;
+    const calledUrl = fetchMock.mock.calls[0]![0] as string;
     expect(calledUrl).toContain('apikey=test-key-123');
     expect(JSON.stringify(page)).not.toContain('apikey');
     expect(JSON.stringify(page)).not.toContain('meta');
@@ -117,7 +117,7 @@ describe('TransitlandService.listOperators', () => {
     );
 
     const page = await makeService().listOperators({ search: 'min' }, createMockContext());
-    const op = page.items[0];
+    const op = page.items[0]!;
     expect(op.shortName).toBeNull();
     expect(op.website).toBeNull();
     expect(op.wikidataId).toBeNull();
@@ -131,9 +131,9 @@ describe('TransitlandService.getOperator', () => {
   it('throws NotFound with the caller reason when the operators array is empty', async () => {
     fetchMock.mockResolvedValueOnce(okJson({ operators: [] }));
     const ctx = createMockContext();
-    const err = await makeService()
+    const err = (await makeService()
       .getOperator('o-nope', ctx, { reason: 'operator_not_found' })
-      .catch((e) => e as McpError);
+      .catch((e) => e)) as McpError;
     expect(err).toBeInstanceOf(McpError);
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'operator_not_found' });
@@ -143,9 +143,9 @@ describe('TransitlandService.getOperator', () => {
     // Transitland 404s an absent /operators/{key}; fetchWithTimeout throws NotFound.
     // The 404 must carry the caller's contract reason and never leak the path.
     fetchMock.mockImplementationOnce(() => throwsHttp(JsonRpcErrorCode.NotFound, 'HTTP 404'));
-    const err = await makeService()
+    const err = (await makeService()
       .getOperator('o-zzz-notreal', createMockContext(), { reason: 'operator_not_found' })
-      .catch((e) => e as McpError);
+      .catch((e) => e)) as McpError;
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'operator_not_found', operatorKey: 'o-zzz-notreal' });
     expect(String(err.message)).toBe('No operator found for "o-zzz-notreal".');
@@ -193,7 +193,7 @@ describe('TransitlandService.listFeeds', () => {
       { operator_onestop_id: 'o-9q9-bart' },
       createMockContext(),
     );
-    const feed = page.items[0];
+    const feed = page.items[0]!;
     expect(feed.fetchUrl).toBe('http://www.bart.gov/google_transit.zip');
     expect(feed.license.spdxIdentifier).toBeNull();
     expect(feed.license.useWithoutAttribution).toBe('yes');
@@ -208,7 +208,7 @@ describe('TransitlandService.listFeeds', () => {
   it('requests only the latest feed version (feed_versions.limit=1)', async () => {
     fetchMock.mockResolvedValueOnce(okJson({ feeds: [] }));
     await makeService().listFeeds({ search: 'mbta' }, createMockContext());
-    const url = fetchMock.mock.calls[0][0] as string;
+    const url = fetchMock.mock.calls[0]![0] as string;
     expect(url).toContain('feed_versions.limit=1');
   });
 });
@@ -216,9 +216,9 @@ describe('TransitlandService.listFeeds', () => {
 describe('TransitlandService.getFeed', () => {
   it('threads the caller reason and a clean message on an HTTP 404', async () => {
     fetchMock.mockImplementationOnce(() => throwsHttp(JsonRpcErrorCode.NotFound, 'HTTP 404'));
-    const err = await makeService()
+    const err = (await makeService()
       .getFeed('f-zzz-notreal', createMockContext(), { reason: 'feed_not_found' })
-      .catch((e) => e as McpError);
+      .catch((e) => e)) as McpError;
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'feed_not_found', feedKey: 'f-zzz-notreal' });
     expect(String(err.message)).toBe('No feed found for "f-zzz-notreal".');
@@ -271,8 +271,8 @@ describe('TransitlandService.listFeedsForOperator', () => {
       limit: 20,
     });
     expect(page.items.map((f) => f.onestopId)).toEqual(['f-9q9-bart', 'f-sf~rt']);
-    expect(page.items[0].fetchUrl).toBe('http://bart.gov/gtfs.zip');
-    expect(page.items[1].realtimeUrls.tripUpdates).toBe('http://511.org/tu');
+    expect(page.items[0]!.fetchUrl).toBe('http://bart.gov/gtfs.zip');
+    expect(page.items[1]!.realtimeUrls.tripUpdates).toBe('http://511.org/tu');
     // No meta.after surfaced (the resolved set is not upstream-paginated).
     expect(page.after).toBeUndefined();
   });
@@ -331,12 +331,12 @@ describe('TransitlandService.listFeedsForOperator', () => {
 
   it('throws the operator NotFound (with reason) when the operator itself is absent', async () => {
     fetchMock.mockImplementationOnce(() => throwsHttp(JsonRpcErrorCode.NotFound, 'HTTP 404'));
-    const err = await makeService()
+    const err = (await makeService()
       .listFeedsForOperator('o-zzz-notreal', createMockContext(), {
         limit: 20,
         failReason: { reason: 'operator_not_found' },
       })
-      .catch((e) => e as McpError);
+      .catch((e) => e)) as McpError;
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
     expect(err.data).toMatchObject({ reason: 'operator_not_found' });
   });
@@ -383,7 +383,7 @@ describe('TransitlandService.getDepartures', () => {
     expect(res.found).toBe(true);
     if (!res.found) throw new Error('expected found');
     expect(res.result.realtimeAvailable).toBe(true);
-    const dep = res.result.departures[0];
+    const dep = res.result.departures[0]!;
     expect(dep.realtime).toBe(true);
     expect(dep.scheduleRelationship).toBe('SCHEDULED');
     expect(dep.estimatedTime).toBe('2026-06-13T17:01:39-04:00');
@@ -414,7 +414,7 @@ describe('TransitlandService.getDepartures', () => {
     const res = await makeService().getDepartures('s-static', {}, createMockContext());
     if (!res.found) throw new Error('expected found');
     expect(res.result.realtimeAvailable).toBe(false);
-    const dep = res.result.departures[0];
+    const dep = res.result.departures[0]!;
     expect(dep.realtime).toBe(false);
     expect(dep.estimatedTime).toBeNull();
     expect(dep.delaySeconds).toBeNull();
@@ -431,7 +431,7 @@ describe('TransitlandService.getDepartures', () => {
   it('sends the look-ahead window as the `next` query param', async () => {
     fetchMock.mockResolvedValueOnce(okJson({ stops: [{ onestop_id: 's-1', departures: [] }] }));
     await makeService().getDepartures('s-1', { next: 7200 }, createMockContext());
-    const url = fetchMock.mock.calls[0][0] as string;
+    const url = fetchMock.mock.calls[0]![0] as string;
     expect(url).toContain('next=7200');
   });
 });
@@ -439,18 +439,18 @@ describe('TransitlandService.getDepartures', () => {
 describe('TransitlandService error classification', () => {
   it('maps an upstream 401 (thrown by fetchWithTimeout) to Unauthorized', async () => {
     fetchMock.mockImplementationOnce(() => throwsHttp(JsonRpcErrorCode.Unauthorized, 'HTTP 401'));
-    const err = await makeService()
+    const err = (await makeService()
       .listOperators({ search: 'x' }, createMockContext())
-      .catch((e) => e as McpError);
+      .catch((e) => e)) as McpError;
     expect(err.code).toBe(JsonRpcErrorCode.Unauthorized);
     expect(String(err.message)).toMatch(/TRANSITLAND_API_KEY/);
   });
 
   it('maps an upstream 404 (thrown by fetchWithTimeout) to NotFound', async () => {
     fetchMock.mockImplementationOnce(() => throwsHttp(JsonRpcErrorCode.NotFound, 'HTTP 404'));
-    const err = await makeService()
+    const err = (await makeService()
       .getOperator('o-9q9-bart', createMockContext())
-      .catch((e) => e as McpError);
+      .catch((e) => e)) as McpError;
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
   });
 });

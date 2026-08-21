@@ -39,7 +39,7 @@ describe('operatorResource', () => {
       tags: { wikidataId: null, usNtdId: null, twitter: null },
     });
     const ctx = createMockContext({ errors: operatorResource.errors });
-    const params = operatorResource.params.parse({ onestop_id: 'o-9q9-bart' });
+    const params = operatorResource.params!.parse({ onestop_id: 'o-9q9-bart' });
     const result = await operatorResource.handler(params, ctx);
     expect(result.onestopId).toBe('o-9q9-bart');
     expect(service.getOperator).toHaveBeenCalledWith('o-9q9-bart', ctx, {
@@ -52,14 +52,14 @@ describe('operatorResource', () => {
       notFound('No operator found', { reason: 'operator_not_found' }),
     );
     const ctx = createMockContext({ errors: operatorResource.errors });
-    const params = operatorResource.params.parse({ onestop_id: 'o-nope' });
+    const params = operatorResource.params!.parse({ onestop_id: 'o-nope' });
     await expect(operatorResource.handler(params, ctx)).rejects.toMatchObject({
       code: JsonRpcErrorCode.NotFound,
     });
   });
 
   it('lists a discoverable example', async () => {
-    const listing = await operatorResource.list!();
+    const listing = await operatorResource.list!({} as never);
     expect(listing.resources.length).toBeGreaterThan(0);
     for (const r of listing.resources) {
       expect(r).toHaveProperty('uri');
@@ -94,7 +94,7 @@ describe('feedResource', () => {
       authorizationRequired: false,
     });
     const ctx = createMockContext({ errors: feedResource.errors });
-    const params = feedResource.params.parse({ onestop_id: 'f-9q9-bart' });
+    const params = feedResource.params!.parse({ onestop_id: 'f-9q9-bart' });
     const result = await feedResource.handler(params, ctx);
     expect(result.onestopId).toBe('f-9q9-bart');
     expect(result.license.redistributionAllowed).toBe('unknown');
@@ -104,14 +104,14 @@ describe('feedResource', () => {
   it('bubbles NotFound for a missing feed', async () => {
     service.getFeed.mockRejectedValueOnce(notFound('No feed found', { reason: 'feed_not_found' }));
     const ctx = createMockContext({ errors: feedResource.errors });
-    const params = feedResource.params.parse({ onestop_id: 'f-nope' });
+    const params = feedResource.params!.parse({ onestop_id: 'f-nope' });
     await expect(feedResource.handler(params, ctx)).rejects.toMatchObject({
       code: JsonRpcErrorCode.NotFound,
     });
   });
 
   it('lists a discoverable example', async () => {
-    const listing = await feedResource.list!();
+    const listing = await feedResource.list!({} as never);
     expect(listing.resources.length).toBeGreaterThan(0);
   });
 });

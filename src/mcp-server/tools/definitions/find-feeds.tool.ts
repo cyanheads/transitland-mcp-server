@@ -166,7 +166,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
   errors: [
     {
       reason: 'no_filter',
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       when: 'No operator_onestop_id, spec, search, or fetch_error filter was provided (server-enforced guard — the upstream API accepts unfiltered requests but returns a global firehose).',
       recovery:
         'Provide at least one filter — operator_onestop_id (from transitland_find_operators) is the most reliable.',
@@ -194,7 +194,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
       !!input.search ||
       input.fetch_error !== undefined;
     if (!hasFilter) {
-      throw ctx.fail('no_filter', undefined, { ...ctx.recoveryFor('no_filter') });
+      throw ctx.fail('no_filter', undefined, ctx.recoveryFor('no_filter'));
     }
 
     const service = getTransitlandService();

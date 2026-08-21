@@ -56,7 +56,7 @@ describe('transitland_find_operators', () => {
     const input = findOperatorsTool.input.parse({ lat: 37.8, lon: -122.27, radius: 2000 });
     const result = await findOperatorsTool.handler(input, ctx);
 
-    expect(result.operators[0].onestopId).toBe('o-9q9-bart');
+    expect(result.operators[0]!.onestopId).toBe('o-9q9-bart');
     const enrich = getEnrichment(ctx);
     expect(enrich.totalCount).toBe(1);
     expect(enrich.cursor).toBe(999);
@@ -72,7 +72,7 @@ describe('transitland_find_operators', () => {
     const ctx = createMockContext({ errors: findOperatorsTool.errors });
     const input = findOperatorsTool.input.parse({});
     await expect(findOperatorsTool.handler(input, ctx)).rejects.toMatchObject({
-      code: JsonRpcErrorCode.InvalidParams,
+      code: JsonRpcErrorCode.ValidationError,
       data: { reason: 'no_filter' },
     });
     expect(service.listOperators).not.toHaveBeenCalled();
@@ -196,8 +196,8 @@ describe('transitland_find_feeds', () => {
     const ctx = createMockContext({ errors: findFeedsTool.errors });
     const input = findFeedsTool.input.parse({ operator_onestop_id: 'o-9q9-bart' });
     const result = await findFeedsTool.handler(input, ctx);
-    expect(result.feeds[0].fetchUrl).toBe('http://bart.gov/gtfs.zip');
-    expect(result.feeds[0].license.redistributionAllowed).toBe('unknown');
+    expect(result.feeds[0]!.fetchUrl).toBe('http://bart.gov/gtfs.zip');
+    expect(result.feeds[0]!.license.redistributionAllowed).toBe('unknown');
     expect(getEnrichment(ctx).totalCount).toBe(1);
     expect(service.listFeedsForOperator).toHaveBeenCalledWith(
       'o-9q9-bart',
@@ -270,8 +270,8 @@ describe('transitland_find_routes', () => {
     const ctx = createMockContext({ errors: findRoutesTool.errors });
     const input = findRoutesTool.input.parse({ lat: 37.8, lon: -122.27 });
     const result = await findRoutesTool.handler(input, ctx);
-    expect(result.routes[0].onestopId).toBe('r-9q9p-800');
-    expect(result.routes[0].mode).toBe('bus');
+    expect(result.routes[0]!.onestopId).toBe('r-9q9p-800');
+    expect(result.routes[0]!.mode).toBe('bus');
   });
 
   it('throws incomplete_point for lon without lat', async () => {
@@ -323,8 +323,8 @@ describe('transitland_find_stops', () => {
     const ctx = createMockContext({ errors: findStopsTool.errors });
     const input = findStopsTool.input.parse({ lat: 37.78, lon: -122.41 });
     const result = await findStopsTool.handler(input, ctx);
-    expect(result.stops[0].onestopId).toBe('s-9q8yyw3xjw-powell');
-    expect(result.stops[0].lat).toBeCloseTo(37.78459);
+    expect(result.stops[0]!.onestopId).toBe('s-9q8yyw3xjw-powell');
+    expect(result.stops[0]!.lat).toBeCloseTo(37.78459);
   });
 
   it('throws no_filter without any filter', async () => {
@@ -389,8 +389,8 @@ describe('transitland_get_departures', () => {
     const input = getDeparturesTool.input.parse({ stop_key: 's-1' });
     const result = await getDeparturesTool.handler(input, ctx);
     expect(result.realtimeAvailable).toBe(true);
-    expect(result.departures[0].realtime).toBe(true);
-    expect(result.departures[0].delaySeconds).toBe(2432);
+    expect(result.departures[0]!.realtime).toBe(true);
+    expect(result.departures[0]!.delaySeconds).toBe(2432);
     // The look-ahead window is passed as `next`, not `next_seconds`.
     expect(service.getDepartures).toHaveBeenCalledWith(
       's-1',
