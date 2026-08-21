@@ -1,10 +1,12 @@
 {
   "manifest_version": "0.3",
   "name": "transitland-mcp-server",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Global transit data via the Transitland v2 registry — operators, GTFS/GTFS-RT/GBFS feeds with license terms, routes, stops, and real-time-aware departures via MCP. STDIO or Streamable HTTP.",
   "author": {
-    "name": "cyanheads"
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
   },
   "repository": {
     "type": "git",

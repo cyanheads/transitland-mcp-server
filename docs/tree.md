@@ -1,20 +1,23 @@
 # transitland-mcp-server - Directory Structure
 
-Generated on: 2026-06-14 02:00:42
+Generated on: 2026-08-21 15:19:36
 
 ```text
 transitland-mcp-server/
-├── .claude/
 ├── .claude-plugin/
 │   └── plugin.json
 ├── .codex-plugin/
 │   ├── mcp.json
 │   └── plugin.json
 ├── .github/
-│   └── ISSUE_TEMPLATE/
-│       ├── bug_report.yml
-│       ├── config.yml
-│       └── feature_request.yml
+│   ├── ISSUE_TEMPLATE/
+│   │   ├── bug_report.yml
+│   │   ├── config.yml
+│   │   └── feature_request.yml
+│   ├── CODE_OF_CONDUCT.md
+│   ├── CONTRIBUTING.md
+│   ├── FUNDING.yml
+│   └── SECURITY.md
 ├── .vscode/
 │   ├── extensions.json
 │   └── settings.json
@@ -26,6 +29,7 @@ transitland-mcp-server/
 ├── scripts/
 │   ├── build-changelog.ts
 │   ├── build.ts
+│   ├── check-dependency-specifiers.ts
 │   ├── check-docs-sync.ts
 │   ├── check-framework-antipatterns.ts
 │   ├── check-skill-versions.ts
@@ -147,14 +151,21 @@ transitland-mcp-server/
 │   │       └── types.ts
 │   └── index.ts
 ├── tests/
+│   ├── fuzz/
+│   │   └── transitland-tools.fuzz.test.ts
+│   ├── integration/
+│   │   └── operator-contract.int.test.ts
 │   ├── resources/
 │   │   └── resources.test.ts
 │   ├── services/
 │   │   └── transitland-service.test.ts
+│   ├── smoke/
+│   │   └── definitions.smoke.test.ts
 │   └── tools/
 │       └── tools.test.ts
 ├── .dockerignore
 ├── .env.example
+├── .gitattributes
 ├── .gitignore
 ├── .mcpbignore
 ├── AGENTS.md
@@ -162,6 +173,7 @@ transitland-mcp-server/
 ├── bun.lock
 ├── bunfig.toml
 ├── CHANGELOG.md
+├── CITATION.cff
 ├── CLAUDE.md
 ├── devcheck.config.json
 ├── Dockerfile
