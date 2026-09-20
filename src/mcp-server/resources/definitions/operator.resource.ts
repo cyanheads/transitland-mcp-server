@@ -80,6 +80,7 @@ export const operatorResource = resource('transitland://operator/{onestop_id}', 
     {
       reason: 'operator_not_found',
       code: JsonRpcErrorCode.NotFound,
+      thrownBy: 'service',
       when: 'No operator exists for the given Onestop ID or internal ID.',
       recovery:
         'Verify the ID format (e.g. "o-9q9-bart") or search with transitland_find_operators to get a valid Onestop ID.',

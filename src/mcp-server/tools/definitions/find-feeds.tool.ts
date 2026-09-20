@@ -174,6 +174,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
     {
       reason: 'operator_not_found',
       code: JsonRpcErrorCode.NotFound,
+      thrownBy: 'service',
       when: 'operator_onestop_id was provided but no operator exists for it (feeds are resolved from the operator record).',
       recovery:
         'Verify the operator Onestop ID (e.g. "o-9q9-bart") or find it with transitland_find_operators.',
@@ -182,6 +183,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
       reason: 'rate_limited',
       code: JsonRpcErrorCode.ServiceUnavailable,
       retryable: true,
+      thrownBy: 'service',
       when: 'Transitland returned HTTP 429.',
       recovery: 'Wait a few seconds and retry; the free key is rate-limited.',
     },

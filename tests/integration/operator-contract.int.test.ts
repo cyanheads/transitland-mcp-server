@@ -39,9 +39,12 @@ toolContractSuite(getOperatorTool, {
   ],
   errors: [
     {
+      // An argument rejection never reaches the handler, so it classifies
+      // InvalidParams (-32602) — not the ValidationError a handler-thrown
+      // ZodError or an output-schema rejection would carry.
       name: 'rejects an empty key at the input schema',
       input: { operator_key: '' },
-      code: JsonRpcErrorCode.ValidationError,
+      code: JsonRpcErrorCode.InvalidParams,
     },
   ],
 });

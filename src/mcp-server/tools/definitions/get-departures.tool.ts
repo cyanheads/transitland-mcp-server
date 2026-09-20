@@ -170,6 +170,7 @@ export const getDeparturesTool = tool('transitland_get_departures', {
       reason: 'rate_limited',
       code: JsonRpcErrorCode.ServiceUnavailable,
       retryable: true,
+      thrownBy: 'service',
       when: 'Transitland returned HTTP 429.',
       recovery: 'Wait a few seconds and retry; the free key is rate-limited.',
     },

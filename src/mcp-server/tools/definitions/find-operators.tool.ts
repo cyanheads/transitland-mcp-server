@@ -174,6 +174,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       reason: 'rate_limited',
       code: JsonRpcErrorCode.ServiceUnavailable,
       retryable: true,
+      thrownBy: 'service',
       when: 'Transitland returned HTTP 429 (free-tier rate limit).',
       recovery:
         'Wait a few seconds and retry. The free key is rate-limited; a Pro key raises the quota.',

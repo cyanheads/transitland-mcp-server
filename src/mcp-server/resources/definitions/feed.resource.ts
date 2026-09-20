@@ -86,6 +86,7 @@ export const feedResource = resource('transitland://feed/{onestop_id}', {
     {
       reason: 'feed_not_found',
       code: JsonRpcErrorCode.NotFound,
+      thrownBy: 'service',
       when: 'No feed exists for the given Onestop ID or internal ID.',
       recovery:
         'Verify the ID format (e.g. "f-9q9-bart") or discover feeds with transitland_find_feeds.',

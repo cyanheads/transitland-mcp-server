@@ -83,6 +83,7 @@ export const getOperatorTool = tool('transitland_get_operator', {
     {
       reason: 'operator_not_found',
       code: JsonRpcErrorCode.NotFound,
+      thrownBy: 'service',
       when: 'No operator exists for the given Onestop ID or internal ID.',
       recovery:
         'Verify the ID format (e.g. "o-9q9-bart") or search with transitland_find_operators to get a valid Onestop ID.',
@@ -91,6 +92,7 @@ export const getOperatorTool = tool('transitland_get_operator', {
       reason: 'rate_limited',
       code: JsonRpcErrorCode.ServiceUnavailable,
       retryable: true,
+      thrownBy: 'service',
       when: 'Transitland returned HTTP 429.',
       recovery: 'Wait a few seconds and retry; the free key is rate-limited.',
     },
