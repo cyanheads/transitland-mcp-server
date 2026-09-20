@@ -21,105 +21,110 @@
 
 ---
 
-## Tools
+## Overview
 
-Six tools mirroring the Transitland resource hierarchy — operators → feeds → routes → stops → departures:
+Transit data from the Transitland v2 registry — the open aggregator of GTFS, GTFS-Realtime, and GBFS feeds from thousands of transit operators worldwide. Find operators, discover feeds and their license terms, and look up routes, stops, and real-time-aware departures from any MCP client. Runs as a stdio process or a local Streamable HTTP server.
+
+### Tools
 
 | Tool | Description |
 |:---|:---|
-| `transitland_find_operators` | Find transit operators/agencies by name, point/radius, bounding box, country/region, or Onestop ID. The entry point for "what transit runs here?" |
-| `transitland_get_operator` | Fetch the full operator record by Onestop ID — agencies, places served, published feeds, and source tags (Wikidata QID, US NTD ID, social handles) |
-| `transitland_find_feeds` | Discover GTFS, GTFS-Realtime, and GBFS feeds — fetch URLs, license terms, and last-fetch freshness. Where to legally get a place's open transit data, and on what terms |
-| `transitland_find_routes` | Find routes by point/radius, bounding box, operator, Onestop ID, or GTFS mode. Returns name, mode, brand color, and operating agency |
-| `transitland_find_stops` | Find stops/stations by point/radius, bounding box, Onestop ID, or operator network. Returns coordinates, location type, accessibility, and timezone |
-| `transitland_get_departures` | Departures from a stop, each flagged `realtime` true/false — live GTFS-Realtime predictions distinguished from static schedule, per departure |
+| `transitland_find_operators` | Find transit operators/agencies by name, point/radius, bounding box, country/region, or Onestop ID |
+| `transitland_get_operator` | Fetch the full operator record by Onestop ID — agencies, feeds, and source tags |
+| `transitland_find_feeds` | Discover GTFS, GTFS-Realtime, and GBFS feeds — fetch URLs, license terms, and freshness |
+| `transitland_find_routes` | Find routes by point/radius, bounding box, operator, Onestop ID, or GTFS mode |
+| `transitland_find_stops` | Find stops/stations by point/radius, bounding box, Onestop ID, or operator network |
+| `transitland_get_departures` | Departures from a stop, each flagged `realtime` true/false |
 
-Transitland does not geocode place names. Turn a city or address into coordinates with a geocoding MCP server (e.g. [`openstreetmap-mcp-server`](https://github.com/cyanheads/openstreetmap-mcp-server)'s `openstreetmap_geocode`) first, then pass `lat`/`lon` or a `bbox`. Geocoding is intentionally not built in — this server resolves coordinates to transit, not names to coordinates.
+Transitland does not geocode place names — resolve a location to coordinates with a geocoding MCP server (e.g. [`openstreetmap-mcp-server`](https://github.com/cyanheads/openstreetmap-mcp-server)'s `openstreetmap_geocode`) before calling a geography-filtered tool.
 
-### `transitland_find_operators`
+### Resources
 
-Find operators near a place or by name — the entry point that resolves a location to the agencies serving it.
+| Resource | Description |
+|:---|:---|
+| `transitland://operator/{onestop_id}` | Operator record by Onestop ID — agencies, places served, published feeds, and source tags |
+| `transitland://feed/{onestop_id}` | Feed record by Onestop ID — spec, fetch URL, license terms, and freshness |
 
-- Filter by `search` (operator/agency name), `lat`+`lon`+`radius`, `bbox`, `onestop_id`, or `adm0_name`/`adm1_name` (country/region)
-- Returns each operator's Onestop ID, name, the places it serves, the feeds it publishes (a `GTFS_RT` entry signals real-time departures may be available), and its Wikidata QID for cross-referencing
-- At least one filter required — an unfiltered query is rejected with a recovery hint rather than returning a global dump
-- Pagination via the `after` cursor; `enrichment.totalCount` and a truncation notice report capped results
+All resource data is also reachable via tools (`transitland_get_operator`, `transitland_find_feeds`).
+
+## Capability reference
+
+### `transitland_find_operators` <sub>tool</sub>
+
+- Filter by `search` (name), `lat`+`lon`+`radius` (max 100,000m, default 1,000m), `bbox`, `onestop_id`, or `adm0_name`/`adm1_name` (country/region) — at least one required, or the call fails as `no_filter`
+- Returns each operator's Onestop ID, name, places served, published feeds (a `GTFS_RT` entry signals real-time departures may be available), and Wikidata QID
+- `lat` requires `lon` and vice versa, or the call fails as `incomplete_point`
+- `limit` caps at 100 (default 20), paginated via the `after` cursor
 
 ---
 
-### `transitland_get_operator`
+### `transitland_get_operator` <sub>tool</sub>
 
-Fetch the complete operator record when you already hold an ID — no search round-trip.
-
-- Accepts an Onestop ID (`o-9q9-bart`) or an internal integer ID
-- Returns agencies (each with the places it serves), published feeds, and source tags: Wikidata QID, US NTD ID, and general social handle
+- Accepts an Onestop ID (e.g. `o-9q9-bart`) or an internal integer ID
+- Returns agencies (each with places served), published feeds, and source tags: Wikidata QID, US NTD ID, general Twitter/X handle
 - Idempotent single-record lookup; mirrored by the `transitland://operator/{onestop_id}` resource
+- `operator_not_found` when the ID doesn't resolve
 
 ---
 
-### `transitland_find_feeds`
+### `transitland_find_feeds` <sub>tool</sub>
 
-The open-data catalog — where to get a place's transit data and whether you may redistribute it.
-
-- Pass `operator_onestop_id` (from `transitland_find_operators`) to list exactly the feeds an operator publishes — the reliable path to a specific agency's feeds
-- Also filter by `spec` (`gtfs`, `gtfs-rt`, `gbfs`, `mds`), `search`, or `fetch_error` (data-quality auditing)
-- Each feed returns its fetch URL, real-time endpoints when present, and license terms — redistribution, commercial use, derived products, and attribution as explicit `yes`/`no`/`unknown` (never inferred from a blank registry field), plus SPDX identifier and attribution text where known
+- Filter by `operator_onestop_id` (from `transitland_find_operators` — the reliable path to one agency's feeds), `spec` (`gtfs`/`gtfs-rt`/`gbfs`/`mds`), `search`, or `fetch_error` — at least one required
+- Each feed returns its fetch URL, real-time endpoints when present, and license terms — redistribution, commercial use, derived products, and attribution as explicit `yes`/`no`/`unknown` (never inferred from a blank field), plus SPDX identifier and attribution text where known
 - Freshness: last-fetch timestamp, content hash, and the calendar window the current data covers
 - `authorizationRequired` flags feeds whose download needs a separate key/registration
+- `limit` caps at 100 (default 20), paginated via `after`
 
 ---
 
-### `transitland_find_routes`
+### `transitland_find_routes` <sub>tool</sub>
 
-Find scheduled (GTFS static) route definitions by geography, operator, or mode.
-
-- Filter by `lat`+`lon`+`radius`, `bbox`, `operator_onestop_id`, `onestop_id`, `route_type` (GTFS mode), or `search`
-- Returns short/long name, the route's GTFS `route_type` mapped to a human-readable mode (bus, subway, rail, ferry, tram, …), brand color, the operating agency's Onestop ID, and the source feed's Onestop ID
-- These are route definitions, not live vehicle positions
-- At least one filter required; pagination via the `after` cursor
+- Filter by `lat`+`lon`+`radius` (max 50,000m, default 1,000m), `bbox`, `operator_onestop_id`, `onestop_id`, `route_type` (GTFS mode integer), or `search` — at least one required
+- Returns short/long name, `route_type` mapped to a human-readable mode (bus, subway, rail, ferry, tram, …), brand color, operating agency's Onestop ID, and source feed's Onestop ID
+- Scheduled (GTFS static) route definitions, not live vehicle positions
+- `lat` requires `lon` and vice versa, or the call fails as `incomplete_point`
+- `limit` caps at 100 (default 20), paginated via `after`
 
 ---
 
-### `transitland_find_stops`
+### `transitland_find_stops` <sub>tool</sub>
 
-Locate stops and stations — the step before departures.
-
-- Filter by `lat`+`lon`+`radius`, `bbox`, `onestop_id`, or `served_by_onestop_ids` (operator/route network)
-- Returns coordinates, GTFS `location_type` with a label (stop, station, entrance, node, boarding area), wheelchair accessibility, timezone, and the parent station's Onestop ID for child platforms
+- Filter by `lat`+`lon`+`radius` (max 10,000m, default 500m), `bbox`, `onestop_id`, or `served_by_onestop_ids` (comma-separated operator/route Onestop IDs) — at least one required
+- Returns coordinates, `location_type` with a label (stop, station, entrance, node, boarding area), wheelchair accessibility, timezone, and the parent station's Onestop ID for child platforms
 - Departures attach to platform-level stops (`location_type` 0) — a station may return none; use its child platforms
-- Pass a returned stop Onestop ID to `transitland_get_departures`
+- `limit` caps at 100 (default 20), paginated via `after`
 
 ---
 
-### `transitland_get_departures`
-
-Departures from a stop, with the live-vs-scheduled distinction made structural.
+### `transitland_get_departures` <sub>tool</sub>
 
 - Resolve a stop to its Onestop ID with `transitland_find_stops` first
-- Every departure carries a `realtime` flag — `true` for a live GTFS-Realtime prediction, `false` for a static scheduled time — plus a `scheduleRelationship` (`STATIC`, `SCHEDULED`, `ADDED`, `CANCELED`, `UNSCHEDULED`, `DUPLICATED`) so a timetable entry is never mistaken for a live arrival and cancellations are visible
+- Every departure carries a `realtime` flag — `true` for a live GTFS-Realtime prediction, `false` for a static scheduled time — plus a `scheduleRelationship` (`STATIC`, `SCHEDULED`, `ADDED`, `CANCELED`, `UNSCHEDULED`, `DUPLICATED`)
 - Returns scheduled and (when real-time) estimated times with delay in seconds, route, headsign, mode, trip, direction, and accessibility
 - Top-level `realtimeAvailable` reports whether the stop's feed publishes GTFS-RT at all
-- Widen `next_seconds` (up to 24h) or set `use_service_window: true` when a stop returns nothing — some feeds only expose times inside their declared service window
+- `next_seconds` look-ahead window: 60–86,400 (default 3,600); widen it or set `use_service_window: true` when a stop returns nothing
+- `stop_not_found` when the stop doesn't resolve — detected from an empty upstream array, not an HTTP 404
 
-## Resources and prompts
+---
 
-| Type | Name | Description |
-|:---|:---|:---|
-| Resource | `transitland://operator/{onestop_id}` | Operator record by Onestop ID — agencies, places served, published feeds, and source tags. Mirrors `transitland_get_operator`. |
-| Resource | `transitland://feed/{onestop_id}` | Feed record by Onestop ID — spec, fetch URL, license terms, and latest-fetch freshness. The open-data catalog entry for one feed. |
+### `transitland://operator/{onestop_id}` <sub>resource</sub>
 
-All resource data is also reachable via tools (`transitland_get_operator`, `transitland_find_feeds`), so tool-only clients lose nothing. Stops and routes have no resource — they're discovered in bulk by geography, not referenced by a single stable URI. No prompts: the domain is operational data lookup, with workflow guidance carried in the tool descriptions (geocode-first, operator-then-feeds, stop-then-departures).
+- Mirrors `transitland_get_operator` — agencies, places served, published feeds, and source tags (Wikidata QID, US NTD ID, Twitter/X handle)
+- `onestop_id` param accepts an Onestop ID (e.g. `o-9q9-bart`) or internal integer ID
+- `operator_not_found` when the ID doesn't resolve
+
+---
+
+### `transitland://feed/{onestop_id}` <sub>resource</sub>
+
+- Mirrors a single-feed result from `transitland_find_feeds` — spec, fetch URL, real-time endpoints, license terms, and latest-fetch freshness
+- `onestop_id` param accepts a feed Onestop ID (e.g. `f-9q9-bart`) or internal integer ID
+- License fields normalize blank registry values to `unknown`/null — never inferred as permissive
+- `feed_not_found` when the ID doesn't resolve
 
 ## Features
 
-Built on [`@cyanheads/mcp-ts-core`](https://www.npmjs.com/package/@cyanheads/mcp-ts-core):
-
-- Declarative tool and resource definitions — single file per primitive, framework handles registration and validation
-- Unified error handling — handlers throw, framework catches, classifies, and formats, with typed per-tool error contracts and agent-facing recovery hints
-- Pluggable auth: `none`, `jwt`, `oauth`
-- Swappable storage backends: `in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`
-- Structured logging with optional OpenTelemetry tracing
-- STDIO and Streamable HTTP transports — runs locally or on Cloudflare Workers from the same codebase
+Built on [`@cyanheads/mcp-ts-core`](https://github.com/cyanheads/mcp-ts-core): stdio and Streamable HTTP transports, pluggable auth (`none` / `jwt` / `oauth`), swappable storage (`in-memory`, `filesystem`, `Supabase`, `Cloudflare KV/R2/D1`), structured logging with optional OpenTelemetry tracing.
 
 Transitland-specific:
 
@@ -305,9 +310,15 @@ See [`CLAUDE.md`](./CLAUDE.md) / [`AGENTS.md`](./AGENTS.md) for development guid
 - Register new tools and resources via the barrels in `src/mcp-server/*/definitions/index.ts`
 - Wrap the Transitland API: validate raw → normalize to domain type → return output schema; never fabricate missing fields (especially license terms — blanks are `unknown`, not permissive)
 
+## Data & licensing
+
+Transit data is provided by [Transitland](https://www.transit.land/terms) — an open registry aggregating GTFS, GTFS-Realtime, and GBFS feeds from thousands of operators worldwide. Products built on Transitland data must display the name "Transitland" with a link to [transit.land/terms](https://www.transit.land/terms), clearly visible to end users.
+
+Transitland aggregates feeds from thousands of operators, each of which may carry its own license and attribution requirements. Review the per-feed license terms at [transit.land/terms](https://www.transit.land/terms) and comply with each source feed's requirements before redistributing or publishing data obtained through this server.
+
 ## Contributing
 
-Issues and pull requests are welcome. Run checks and tests before submitting:
+Issues are welcome. Run checks and tests before submitting:
 
 ```sh
 bun run devcheck
@@ -317,9 +328,3 @@ bun run test
 ## License
 
 Apache-2.0 — see [LICENSE](LICENSE) for details.
-
-## Data & licensing
-
-Transit data is provided by [Transitland](https://www.transit.land/terms) — an open registry aggregating GTFS, GTFS-Realtime, and GBFS feeds from thousands of operators worldwide. Products built on Transitland data must display the name "Transitland" with a link to [transit.land/terms](https://www.transit.land/terms), clearly visible to end users.
-
-Transitland aggregates feeds from thousands of operators, each of which may carry its own license and attribution requirements. Review the per-feed license terms at [transit.land/terms](https://www.transit.land/terms) and comply with each source feed's requirements before redistributing or publishing data obtained through this server.
