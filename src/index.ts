@@ -10,7 +10,11 @@ import { allResourceDefinitions } from './mcp-server/resources/definitions/index
 import { allToolDefinitions } from './mcp-server/tools/definitions/index.js';
 import { initTransitlandService } from './services/transitland/transitland-service.js';
 
-await createApp({
+/**
+ * The running server. Exported so a test (or an embedder) can reach
+ * `shutdown()` after importing this entry point.
+ */
+export const app = await createApp({
   name: 'transitland-mcp-server',
   title: 'transitland-mcp-server',
   tools: allToolDefinitions,
@@ -22,6 +26,12 @@ await createApp({
     'find_feeds is the standout — fetch URLs, license terms, and freshness for open transit data. ' +
     'get_departures distinguishes live GTFS-Realtime predictions (realtime=true) from static schedule (realtime=false) per departure. ' +
     'For deep live tracking in a configured region, prefer onebusaway-mcp-server.',
+  // Session posture declared in code rather than left to a deployment's
+  // MCP_SESSION_MODE (which still wins when it carries a meaningful value).
+  // Every tool is a per-call read against the registry and none calls
+  // ctx.requestInput, so stateless drops the session store and the
+  // per-session McpServer allocation.
+  sessionMode: 'stateless',
   setup(core) {
     initTransitlandService(core.config, core.storage);
   },
