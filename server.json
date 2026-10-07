@@ -6,14 +6,14 @@
     "url": "https://github.com/cyanheads/transitland-mcp-server",
     "source": "github"
   },
-  "version": "0.1.2",
+  "version": "0.1.3",
   "packages": [
     {
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/transitland-mcp-server",
       "runtimeHint": "npx",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "environmentVariables": [
         {
           "name": "TRANSITLAND_API_KEY",
@@ -46,7 +46,7 @@
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@cyanheads/transitland-mcp-server",
       "runtimeHint": "npx",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "environmentVariables": [
         {
           "name": "MCP_TRANSPORT_TYPE",
