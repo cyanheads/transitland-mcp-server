@@ -297,11 +297,10 @@ interface NotFoundFail {
 /**
  * Describes a single-record lookup so a 404 (or a 200 + empty record array) can be
  * turned into a clean, contract-carrying NotFound. `key` is the caller-facing
- * identifier surfaced in the message; `ctx`/`fail` thread the tool's declared
- * `reason` + recovery hint onto `error.data` so they match `tools/list`.
+ * identifier surfaced in the message; `fail` supplies the declared reason so
+ * the framework can fill the matching recovery hint on the wire.
  */
 interface NotFoundLookup {
-  ctx: Context;
   fail?: NotFoundFail;
   key: string;
   kind: string;
@@ -388,16 +387,16 @@ export class TransitlandService {
   /**
    * Build the NotFound a single-record lookup throws — clean message naming the
    * caller's ID (never the internal endpoint path), with the tool's declared
-   * contract `reason` + recovery hint on `error.data` so it matches `tools/list`.
+   * contract `reason` on `error.data`; the framework fills its recovery hint.
    * Shared by the HTTP-404 path and the 200-with-empty-array path.
    */
   private notFoundFor(lookup: NotFoundLookup, options?: { cause?: unknown }): Error {
-    const { ctx, fail, key, kind } = lookup;
+    const { fail, key, kind } = lookup;
     return notFound(
       `No ${kind} found for "${key}".`,
       {
         [`${kind}Key`]: key,
-        ...(fail && { reason: fail.reason, ...ctx.recoveryFor(fail.reason) }),
+        ...(fail && { reason: fail.reason }),
       },
       options,
     );
@@ -495,7 +494,6 @@ export class TransitlandService {
    */
   async getOperator(key: string, ctx: Context, failReason?: NotFoundFail): Promise<OperatorRecord> {
     const lookup: NotFoundLookup = {
-      ctx,
       key,
       kind: 'operator',
       ...(failReason && { fail: failReason }),
@@ -557,7 +555,6 @@ export class TransitlandService {
     const raw = await this.fetchFeedRaw(key, ctx);
     if (!raw) {
       throw this.notFoundFor({
-        ctx,
         key,
         kind: 'feed',
         ...(failReason && { fail: failReason }),

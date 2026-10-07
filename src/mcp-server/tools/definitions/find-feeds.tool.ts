@@ -196,7 +196,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
       !!input.search ||
       input.fetch_error !== undefined;
     if (!hasFilter) {
-      throw ctx.fail('no_filter', undefined, ctx.recoveryFor('no_filter'));
+      throw ctx.fail('no_filter');
     }
 
     const service = getTransitlandService();

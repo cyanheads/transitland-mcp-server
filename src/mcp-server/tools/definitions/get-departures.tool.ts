@@ -190,7 +190,6 @@ export const getDeparturesTool = tool('transitland_get_departures', {
     if (!response.found) {
       throw ctx.fail('stop_not_found', `No stop record found for "${input.stop_key}".`, {
         stopKey: input.stop_key,
-        ...ctx.recoveryFor('stop_not_found'),
       });
     }
 

@@ -172,7 +172,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
 
   async handler(input, ctx) {
     if ((input.lat === undefined) !== (input.lon === undefined)) {
-      throw ctx.fail('incomplete_point', undefined, ctx.recoveryFor('incomplete_point'));
+      throw ctx.fail('incomplete_point');
     }
     const hasPoint = input.lat !== undefined && input.lon !== undefined;
     const hasFilter =
@@ -183,7 +183,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
       !!input.search ||
       input.route_type !== undefined;
     if (!hasFilter) {
-      throw ctx.fail('no_filter', undefined, ctx.recoveryFor('no_filter'));
+      throw ctx.fail('no_filter');
     }
 
     const params: Record<string, string | number | boolean | undefined> = {
