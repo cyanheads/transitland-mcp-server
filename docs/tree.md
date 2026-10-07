@@ -1,6 +1,6 @@
 # transitland-mcp-server - Directory Structure
 
-Generated on: 2026-09-20 20:40:28
+Generated on: 2026-10-07 12:33:08
 
 ```text
 transitland-mcp-server/
@@ -126,9 +126,11 @@ transitland-mcp-server/
 │   ├── clean-mcpb.ts
 │   ├── clean.ts
 │   ├── devcheck.ts
+│   ├── install-otel.ts
 │   ├── lint-mcp.ts
 │   ├── lint-packaging.ts
 │   ├── list-skills.ts
+│   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
 ├── src/
@@ -159,6 +161,7 @@ transitland-mcp-server/
 │   │   └── transitland-tools.fuzz.test.ts
 │   ├── integration/
 │   │   ├── operator-contract.int.test.ts
+│   │   ├── recovery-contract.int.test.ts
 │   │   └── session-mode.int.test.ts
 │   ├── resources/
 │   │   └── resources.test.ts

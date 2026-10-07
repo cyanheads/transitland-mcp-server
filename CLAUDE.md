@@ -2,9 +2,9 @@
 
 **Server:** transitland-mcp-server
 **Version:** 0.1.2
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.6`
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.13`
 **Engines:** Bun ≥1.4.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/server` ^2.0.0
+**MCP SDK:** `@modelcontextprotocol/server` ^2.2.0
 **Zod:** ^4.6.5
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
@@ -198,14 +198,15 @@ Handlers receive a unified `ctx` object. Key properties:
 | Property | Description |
 |:---------|:------------|
 | `ctx.log` | Request-scoped logger — `.debug()`, `.info()`, `.notice()`, `.warning()`, `.error()`. Auto-correlates requestId, traceId, tenantId. Dual-sink: Pino **and** `notifications/message` to the client, so treat it as client-visible. |
-| `ctx.state` | Tenant-scoped KV — `.get(key)`, `.set(key, value, { ttl? })`, `.delete(key)`, `.getMany(keys)`, `.list(prefix, { cursor, limit })`. Unused by current tools (read-mostly registry, per-call) — available if session caching is added later. |
+| `ctx.state` | Tenant-scoped KV — `.get(key)`, `.set(key, value, { ttl? })`, `.delete(key)`, `.getMany(keys)`, `.list(prefix, { cursor, limit })`. Values round-trip as JSON (a Date reads back as an ISO string). Unused by current tools (read-mostly registry, per-call). |
 | `ctx.requestInput` | Suspend and ask the caller for more input — `return ctx.requestInput(...)`. Never returns; the handler is re-entered with the answers. Always present. |
-| `ctx.inputs` | Reader over a retried request's responses — `.accepted(key, schema)`, `.view(key)`, `.state()`, `.dropped`. Empty on the first round. |
+| `ctx.inputs` | Reader over a retried request's responses — `.accepted(key, schema)`, `.view(key)`, `.state()`, `.dropped`; limited to the capabilities and modes the client declared. Empty on the first round. |
+| `ctx.clientCapabilities` | What the client declared for this request; undefined when no view exists. Decides whether to ask for optional context, never whether to skip consent. |
 | `ctx.enrich` | Success-path agent context (empty-result notices, pagination totals). `ctx.enrich.total(n)` (always-present count), `ctx.enrich({ cursor })` (the `after` pager), `ctx.enrich.truncated({ shown, cap })` (capped lists), `ctx.enrich.notice(msg)` (empty-result recovery hints). Used by every list tool here; reaches `structuredContent` and `content[]`, and lands only when the definition declares an `enrichment` block. |
 | `ctx.content` | Non-text content blocks — `.image(data, mimeType)`, `.audio(data, mimeType)`, or `ctx.content(block)` for a raw block. Prepended to `content[]` after `format()`; never enters `structuredContent`. |
-| `ctx.fail` | Throw a typed contract error — `ctx.fail(reason, message?, data?)`, with `ctx.recoveryFor(reason)` to spread the declared recovery hint. |
+| `ctx.fail` | Throw a typed contract error — `ctx.fail(reason, message?, data?)`. The framework fills a declared recovery hint when the thrown error names its reason and has no hint. |
 | `ctx.signal` | `AbortSignal` for cancellation, forwarded into upstream fetches. |
-| `ctx.requestId` | Unique request ID. |
+| `ctx.requestId` | Framework-generated request ID; shared by the call's log records and error envelope. The client's JSON-RPC ID is logged as jsonRpcId. |
 | `ctx.tenantId` | Tenant ID from JWT or `'default'` for stdio. |
 
 ---
@@ -214,9 +215,9 @@ Handlers receive a unified `ctx` object. Key properties:
 
 Handlers throw — the framework catches, classifies, and formats.
 
-**Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable?, severity?, thrownBy? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required (≥ 5 words, lint-validated) — the single source of truth for the agent's next move. Pass `ctx.recoveryFor('reason')` as the throw's data to put it on the wire (`data.recovery.hint`, mirrored into `content[]` text unless the message already contains it verbatim); override with an explicit `{ recovery: { hint: '...' } }` when dynamic runtime context matters. Forwarding it is lint-enforced per throw site (`error-contract-recovery-unforwarded`). Mark an entry the service layer throws with `thrownBy: 'service'` so `error-contract-unthrown` skips it — lint-only metadata, nothing at runtime reads it; every `not_found` and `rate_limited` entry here carries it, since `TransitlandService` classifies those. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`, `RequestCancelled`) bubble freely and don't need declaring.
+**Recommended: typed error contract.** Declare `errors: [{ reason, code, when, recovery, retryable?, severity?, thrownBy? }]` on `tool()` / `resource()` to receive `ctx.fail(reason, …)` typed against the reason union. TypeScript catches typos at compile time, `data.reason` is auto-populated for observability, linter enforces conformance against the handler body. `recovery` is required (≥ 5 words, lint-validated) — the single source of truth for the agent's next move. The framework fills it when a tool or resource failure carries the declared `data.reason` without a hint (`data.recovery.hint`, mirrored into `content[]` text unless the message already contains it verbatim). Explicit `{ recovery: { hint: '...' } }` overrides still win. Mark an entry the service layer throws with `thrownBy: 'service'` so `error-contract-unthrown` skips it — lint-only metadata; it does not check that the service's thrown code and reason match the entry. Baseline codes (`InternalError`, `ServiceUnavailable`, `Timeout`, `ValidationError`, `SerializationError`, `RequestCancelled`) bubble freely and don't need declaring.
 
-Error `content[]` closes with `(reason <reason> · not retryable)` whenever `data.reason` is a non-empty string or `data.retryable` a boolean, and an argument rejection the framework raises before the handler runs classifies `InvalidParams` (`-32602`) with `data.reason: "invalid_arguments"`. Assert containment, never a byte-exact error string, in tests.
+Error envelopes carry `data.requestId`, and `content[]` closes with `(reason <reason> · not retryable · request <id>)` whenever those fields are present, and an argument rejection the framework raises before the handler runs classifies `InvalidParams` (`-32602`) with `data.reason: "invalid_arguments"`. Assert containment, never a byte-exact error string, in tests.
 
 ```ts
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
@@ -228,7 +229,7 @@ errors: [
 ],
 async handler(input, ctx) {
   const item = await db.find(input.id);
-  if (!item) throw ctx.fail('no_match', `No item ${input.id}`, ctx.recoveryFor('no_match'));
+  if (!item) throw ctx.fail('no_match', `No item ${input.id}`);
   return item;
 }
 ```
@@ -417,7 +418,7 @@ security: false                            # optional — true ONLY for a source
 
 ## Publishing
 
-**Every release goes through a release PR, straight-through** — `git-wrapup`'s "Release PR mode", mode `straight-through`. One run: `git-wrapup` lands the commit stack on `release/<version>`, pushes it, and opens the PR (title = the release commit subject, body = the changelog entry plus a gates section); `release-and-publish` then fast-forwards `main` locally with `git merge --ff-only`, creates the tag on `main`'s tip, pushes `main` and the tag, deletes the branch, and publishes. A caller's brief may run a given release as `gated` instead — a `release-pr-review` pass on the open PR before `release-and-publish`. **Never merge through the GitHub UI or `gh pr merge`**: squash and rebase-merge are disabled in the repo settings because both rewrite the stack (rebase-merge also strips the SSH signatures), and a merge commit breaks the linear history.
+**Every release goes through a release PR, straight-through** — `git-wrapup`'s "Release PR mode", mode `straight-through`. One run: `git-wrapup` lands the commit stack on `release/<version>`, pushes it, and opens the PR (title = the release commit subject, body = the release digest: theme line, `## Changes`, `## Gates`, changelog link last); `release-and-publish` then fast-forwards `main` locally with `git merge --ff-only`, creates the tag on `main`'s tip, pushes `main` and the tag, deletes the branch, and publishes. A caller's brief may run a given release as `gated` instead — a `release-pr-review` pass on the open PR before `release-and-publish`. **Never merge through the GitHub UI or `gh pr merge`**: squash and rebase-merge are disabled in the repo settings because both rewrite the stack (rebase-merge also strips the SSH signatures), and a merge commit breaks the linear history.
 
 ---
 
