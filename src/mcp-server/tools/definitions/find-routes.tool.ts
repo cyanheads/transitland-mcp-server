@@ -72,9 +72,10 @@ export const findRoutesTool = tool('transitland_find_routes', {
       .number()
       .int()
       .min(1)
-      .max(100)
       .default(20)
-      .describe('Maximum routes to return (max 100). Page further with the after cursor.'),
+      .describe(
+        'Maximum routes to return. Values above 100 apply the 100-result page cap with a notice. Page further with the after cursor.',
+      ),
     after: z
       .number()
       .int()
@@ -101,11 +102,14 @@ export const findRoutesTool = tool('transitland_find_routes', {
               .string()
               .nullable()
               .describe('Route description (e.g. "via Columbus / 7 Av"). Often null.'),
-            routeType: z.number().describe('GTFS route_type integer.'),
+            routeType: z
+              .number()
+              .nullable()
+              .describe('GTFS route_type integer. Null when omitted upstream.'),
             mode: z
               .string()
               .describe(
-                'Human-readable mode derived from route_type: tram, subway, rail, bus, ferry, cable tram, aerial lift, funicular, trolleybus, monorail, or "type N" for unmapped values.',
+                'Human-readable basic or recognized extended GTFS mode, including coach and water transport. Extended urban rail 400–404 uses the coarse label subway. "unknown" when route_type is missing; "type N" for other present codes.',
               ),
             color: z
               .string()
@@ -162,7 +166,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
     },
     {
       reason: 'rate_limited',
-      code: JsonRpcErrorCode.ServiceUnavailable,
+      code: JsonRpcErrorCode.RateLimited,
       retryable: true,
       thrownBy: 'service',
       when: 'Transitland returned HTTP 429.',
@@ -171,6 +175,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
   ],
 
   async handler(input, ctx) {
+    const limit = Math.min(input.limit, 100);
     if ((input.lat === undefined) !== (input.lon === undefined)) {
       throw ctx.fail('incomplete_point');
     }
@@ -187,7 +192,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
     }
 
     const params: Record<string, string | number | boolean | undefined> = {
-      limit: input.limit,
+      limit,
       bbox: input.bbox,
       operator_onestop_id: input.operator_onestop_id,
       onestop_id: input.onestop_id,
@@ -204,12 +209,17 @@ export const findRoutesTool = tool('transitland_find_routes', {
     const page = await getTransitlandService().listRoutes(params, ctx);
     ctx.enrich.total(page.items.length);
     if (page.after !== undefined) ctx.enrich({ cursor: page.after });
-    if (page.items.length >= input.limit) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: input.limit });
+    if (page.items.length >= limit) {
+      ctx.enrich.truncated({ shown: page.items.length, cap: limit });
     }
+    const capNotice =
+      input.limit > limit
+        ? `Requested ${input.limit} results; applied the ${limit}-result page cap. Page further with the after cursor when one is returned. `
+        : '';
+    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
     if (page.items.length === 0) {
       ctx.enrich.notice(
-        'No routes matched. If you passed a place name, geocode it to coordinates with openstreetmap_geocode first. Otherwise widen the radius or filter by operator_onestop_id.',
+        `${capNotice}No routes matched. If you passed a place name, geocode it to coordinates with openstreetmap_geocode first. Otherwise widen the radius or filter by operator_onestop_id.`,
       );
     }
     ctx.log.info('find_routes resolved', { count: page.items.length });
@@ -225,7 +235,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
       const label = route.shortName ?? route.longName ?? route.onestopId;
       lines.push(`## ${label}${route.shortName && route.longName ? ` — ${route.longName}` : ''}`);
       lines.push(`**Onestop ID:** ${route.onestopId}`);
-      lines.push(`**Mode:** ${route.mode} (route_type ${route.routeType})`);
+      lines.push(`**Mode:** ${route.mode} (route_type ${route.routeType ?? 'unknown'})`);
       lines.push(`**Color:** ${route.color ? `#${route.color}` : 'Not available'}`);
       lines.push(
         `**Operator:** ${route.operator.name || 'Not available'}${route.operator.onestopId ? ` (${route.operator.onestopId})` : ''}`,

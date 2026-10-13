@@ -71,9 +71,10 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       .number()
       .int()
       .min(1)
-      .max(100)
       .default(20)
-      .describe('Maximum operators to return (max 100). Page further with the after cursor.'),
+      .describe(
+        'Maximum operators to return. Values above 100 apply the 100-result page cap with a notice. Page further with the after cursor.',
+      ),
     after: z
       .number()
       .int()
@@ -172,7 +173,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
     },
     {
       reason: 'rate_limited',
-      code: JsonRpcErrorCode.ServiceUnavailable,
+      code: JsonRpcErrorCode.RateLimited,
       retryable: true,
       thrownBy: 'service',
       when: 'Transitland returned HTTP 429 (free-tier rate limit).',
@@ -182,6 +183,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
   ],
 
   async handler(input, ctx) {
+    const limit = Math.min(input.limit, 100);
     if ((input.lat === undefined) !== (input.lon === undefined)) {
       throw ctx.fail('incomplete_point');
     }
@@ -198,7 +200,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
     }
 
     const params: Record<string, string | number | boolean | undefined> = {
-      limit: input.limit,
+      limit,
       search: input.search,
       onestop_id: input.onestop_id,
       adm0_name: input.adm0_name,
@@ -215,12 +217,17 @@ export const findOperatorsTool = tool('transitland_find_operators', {
     const page = await getTransitlandService().listOperators(params, ctx);
     ctx.enrich.total(page.items.length);
     if (page.after !== undefined) ctx.enrich({ cursor: page.after });
-    if (page.items.length >= input.limit) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: input.limit });
+    if (page.items.length >= limit) {
+      ctx.enrich.truncated({ shown: page.items.length, cap: limit });
     }
+    const capNotice =
+      input.limit > limit
+        ? `Requested ${input.limit} results; applied the ${limit}-result page cap. Page further with the after cursor when one is returned. `
+        : '';
+    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
     if (page.items.length === 0) {
       ctx.enrich.notice(
-        'No operators matched. If you passed a place name, Transitland needs coordinates — geocode it with openstreetmap_geocode first, then pass lat/lon or bbox. Otherwise broaden the search or radius.',
+        `${capNotice}No operators matched. If you passed a place name, Transitland needs coordinates — geocode it with openstreetmap_geocode first, then pass lat/lon or bbox. Otherwise broaden the search or radius.`,
       );
     }
     ctx.log.info('find_operators resolved', { count: page.items.length });

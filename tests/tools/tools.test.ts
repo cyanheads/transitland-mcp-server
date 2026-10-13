@@ -159,6 +159,28 @@ describe('transitland_get_operator', () => {
     expect(text).toContain('f-9q9-bart');
     expect(text).toContain('BA');
   });
+
+  it('formats nested agency places and named feed references', () => {
+    const blocks = getOperatorTool.format!({
+      onestopId: 'o-test',
+      name: 'Test',
+      shortName: null,
+      website: null,
+      agencies: [
+        {
+          agencyId: 'a',
+          agencyName: 'Agency',
+          places: [{ city: 'Seattle', region: 'Washington', country: 'US' }],
+        },
+      ],
+      feeds: [{ onestopId: 'f-test', spec: 'GTFS', name: 'Named feed' }],
+      tags: { wikidataId: null, usNtdId: '123', twitter: 'handle' },
+    });
+    const text = blocks.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n');
+    expect(text).toContain('Seattle, Washington, US');
+    expect(text).toContain('Named feed');
+    expect(text).toContain('NTD 123 · Twitter handle');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -303,6 +325,20 @@ describe('transitland_find_routes', () => {
 // ---------------------------------------------------------------------------
 
 describe('transitland_find_stops', () => {
+  it('accepts search alone and advertises it in recovery guidance', async () => {
+    service.listStops.mockResolvedValueOnce({ items: [] });
+    const ctx = createMockContext({ errors: findStopsTool.errors });
+    await findStopsTool.handler(findStopsTool.input.parse({ search: 'Powell' }), ctx);
+    expect(service.listStops).toHaveBeenCalledWith(
+      expect.objectContaining({ search: 'Powell' }),
+      ctx,
+    );
+    expect(findStopsTool.description).toContain('or search');
+    const guard = findStopsTool.errors!.find((e) => e.reason === 'no_filter')!;
+    expect(guard.when).toContain('search');
+    expect(guard.recovery).toContain('search');
+    expect(String(getEnrichment(ctx).notice)).toContain('Broaden the stop-name search');
+  });
   const stop = {
     onestopId: 's-9q8yyw3xjw-powell',
     name: 'Powell',

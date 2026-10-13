@@ -7,7 +7,7 @@
 
 <div align="center">
 
-[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/transitland-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.2.0-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/transitland-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/transitland-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.2-blueviolet.svg?style=flat-square)](https://bun.sh/)
+[![Version](https://img.shields.io/badge/Version-0.1.3-blue.svg?style=flat-square)](./CHANGELOG.md) [![License](https://img.shields.io/badge/License-Apache%202.0-orange.svg?style=flat-square)](./LICENSE) [![Docker](https://img.shields.io/badge/Docker-ghcr.io-2496ED?style=flat-square&logo=docker&logoColor=white)](https://github.com/users/cyanheads/packages/container/package/transitland-mcp-server) [![MCP SDK](https://img.shields.io/badge/MCP%20SDK-^2.3.1-green.svg?style=flat-square)](https://modelcontextprotocol.io/) [![npm](https://img.shields.io/npm/v/@cyanheads/transitland-mcp-server?style=flat-square&logo=npm&logoColor=white)](https://www.npmjs.com/package/@cyanheads/transitland-mcp-server) [![TypeScript](https://img.shields.io/badge/TypeScript-^7.0.2-3178C6.svg?style=flat-square)](https://www.typescriptlang.org/) [![Bun](https://img.shields.io/badge/Bun-v1.4.3-blueviolet.svg?style=flat-square)](https://bun.sh/)
 
 </div>
 
@@ -33,7 +33,7 @@ Transit data from the Transitland v2 registry — the open aggregator of GTFS, G
 | `transitland_get_operator` | Fetch the full operator record by Onestop ID — agencies, feeds, and source tags |
 | `transitland_find_feeds` | Discover GTFS, GTFS-Realtime, and GBFS feeds — fetch URLs, license terms, and freshness |
 | `transitland_find_routes` | Find routes by point/radius, bounding box, operator, Onestop ID, or GTFS mode |
-| `transitland_find_stops` | Find stops/stations by point/radius, bounding box, Onestop ID, or operator network |
+| `transitland_find_stops` | Find stops/stations by name, point/radius, bounding box, Onestop ID, or operator network |
 | `transitland_get_departures` | Departures from a stop, each flagged `realtime` true/false |
 
 Transitland does not geocode place names — resolve a location to coordinates with a geocoding MCP server (e.g. [`openstreetmap-mcp-server`](https://github.com/cyanheads/openstreetmap-mcp-server)'s `openstreetmap_geocode`) before calling a geography-filtered tool.
@@ -48,6 +48,8 @@ Transitland does not geocode place names — resolve a location to coordinates w
 All resource data is also reachable via tools (`transitland_get_operator`, `transitland_find_feeds`).
 
 ## Capability reference
+
+Page limits default to 20 and apply a 100-result cap. A larger `limit` carries a requested/applied-cap notice; `truncated`, `shown`, and `cap` appear when the returned page reaches the applied limit. Empty or short pages do not claim truncation. Use the returned `after` cursor where available to continue.
 
 ### `transitland_find_operators` <sub>tool</sub>
 
@@ -69,7 +71,7 @@ All resource data is also reachable via tools (`transitland_get_operator`, `tran
 
 ### `transitland_find_feeds` <sub>tool</sub>
 
-- Filter by `operator_onestop_id` (from `transitland_find_operators` — the reliable path to one agency's feeds), `spec` (`gtfs`/`gtfs-rt`/`gbfs`/`mds`), `search`, or `fetch_error` — at least one required
+- Filter by `operator_onestop_id` (from `transitland_find_operators` — the reliable path to one agency's feeds), `spec` (`gtfs`/`gtfs-rt`/`gbfs`/`mds`), `search`, or `fetch_error` — at least one required. Spec input accepts case and underscore/hyphen variants such as `GTFS_RT`; unknown specs still reject
 - Each feed returns its fetch URL, real-time endpoints when present, and license terms — redistribution, commercial use, derived products, and attribution as explicit `yes`/`no`/`unknown` (never inferred from a blank field), plus SPDX identifier and attribution text where known
 - Freshness: last-fetch timestamp, content hash, and the calendar window the current data covers
 - `authorizationRequired` flags feeds whose download needs a separate key/registration
@@ -80,7 +82,7 @@ All resource data is also reachable via tools (`transitland_get_operator`, `tran
 ### `transitland_find_routes` <sub>tool</sub>
 
 - Filter by `lat`+`lon`+`radius` (max 50,000m, default 1,000m), `bbox`, `operator_onestop_id`, `onestop_id`, `route_type` (GTFS mode integer), or `search` — at least one required
-- Returns short/long name, `route_type` mapped to a human-readable mode (bus, subway, rail, ferry, tram, …), brand color, operating agency's Onestop ID, and source feed's Onestop ID
+- Returns short/long name, basic and recognized extended GTFS modes (bus, subway, rail, coach, water transport, ferry, tram, …), brand color, operating agency's Onestop ID, and source feed's Onestop ID. Missing route type is `null` with mode `unknown`; unsupported present codes remain `type N`
 - Scheduled (GTFS static) route definitions, not live vehicle positions
 - `lat` requires `lon` and vice versa, or the call fails as `incomplete_point`
 - `limit` caps at 100 (default 20), paginated via `after`
@@ -89,8 +91,8 @@ All resource data is also reachable via tools (`transitland_get_operator`, `tran
 
 ### `transitland_find_stops` <sub>tool</sub>
 
-- Filter by `lat`+`lon`+`radius` (max 10,000m, default 500m), `bbox`, `onestop_id`, or `served_by_onestop_ids` (comma-separated operator/route Onestop IDs) — at least one required
-- Returns coordinates, `location_type` with a label (stop, station, entrance, node, boarding area), wheelchair accessibility, timezone, and the parent station's Onestop ID for child platforms
+- Filter by `lat`+`lon`+`radius` (max 10,000m, default 500m), `bbox`, `onestop_id`, `served_by_onestop_ids` (comma-separated operator/route Onestop IDs), or stop-name `search` — at least one required. Name searches need no geocoding; geocode place names for geographic queries
+- Returns coordinates (`null` when missing upstream; real zero is preserved), `location_type` with a label (stop, station, entrance, node, boarding area), wheelchair accessibility, timezone, and the parent station's Onestop ID for child platforms
 - Departures attach to platform-level stops (`location_type` 0) — a station may return none; use its child platforms
 - `limit` caps at 100 (default 20), paginated via `after`
 

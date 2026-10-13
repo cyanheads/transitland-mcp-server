@@ -50,6 +50,25 @@ function makeService() {
 }
 
 describe('TransitlandService.listOperators', () => {
+  it('drops empty places and feed refs while preserving distinct normalized facts', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        operators: [
+          {
+            agencies: [{ places: [{}, { adm0_name: '  US  ' }, { adm0_name: 'US' }] }, {}],
+            feeds: [{}, { onestop_id: ' f-valid ', name: '  Named  ' }],
+          },
+        ],
+      }),
+    );
+    const page = await makeService().listOperators({}, createMockContext());
+    expect(page.items[0]).toMatchObject({
+      onestopId: '',
+      name: '',
+      places: [{ country: 'US', region: null, city: null }],
+      feeds: [{ onestopId: 'f-valid', spec: 'unknown', name: 'Named' }],
+    });
+  });
   it('normalizes an operator, collapses places, and discards meta.next while keeping the after cursor', async () => {
     fetchMock.mockResolvedValueOnce(
       okJson({
@@ -128,6 +147,45 @@ describe('TransitlandService.listOperators', () => {
 });
 
 describe('TransitlandService.getOperator', () => {
+  it('normalizes nested agencies, tags and missing values on a full record', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        operators: [
+          {
+            agencies: [
+              {},
+              {
+                agency_id: ' a ',
+                agency_name: ' Agency ',
+                places: [{ adm0_name: 'US', adm1_name: 'WA', city_name: 'Seattle' }],
+              },
+            ],
+            feeds: [{}],
+            tags: { wikidata_id: ' Q1 ', us_ntd_id: ' 123 ', twitter_general: ' handle ' },
+          },
+        ],
+      }),
+    );
+    expect(await makeService().getOperator('o-test', createMockContext())).toMatchObject({
+      onestopId: '',
+      name: '',
+      agencies: [
+        { agencyId: '', agencyName: '', places: [] },
+        {
+          agencyId: 'a',
+          agencyName: 'Agency',
+          places: [{ country: 'US', region: 'WA', city: 'Seattle' }],
+        },
+      ],
+      feeds: [],
+      tags: { wikidataId: 'Q1', usNtdId: '123', twitter: 'handle' },
+    });
+    fetchMock.mockResolvedValueOnce(okJson({ operators: [{}] }));
+    expect(await makeService().getOperator('o-sparse', createMockContext())).toMatchObject({
+      agencies: [],
+      tags: { wikidataId: null, usNtdId: null, twitter: null },
+    });
+  });
   it('throws NotFound with the caller reason when the operators array is empty', async () => {
     fetchMock.mockResolvedValueOnce(okJson({ operators: [] }));
     const ctx = createMockContext();
@@ -154,6 +212,44 @@ describe('TransitlandService.getOperator', () => {
 });
 
 describe('TransitlandService.listFeeds', () => {
+  it('normalizes sparse feeds, explicit no terms and authorization requirements', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        feeds: [
+          {},
+          {
+            authorization: { type: 'apikey' },
+            license: { redistribution_allowed: 'no' },
+            urls: {
+              realtime_vehicle_positions: ' https://example.test/vehicles ',
+              realtime_alerts: 'https://example.test/alerts',
+            },
+          },
+        ],
+      }),
+    );
+    const page = await makeService().listFeeds({}, createMockContext());
+    expect(page.items[0]).toMatchObject({
+      onestopId: '',
+      spec: 'unknown',
+      name: null,
+      fetchUrl: null,
+      latestFetch: {
+        fetchedAt: null,
+        earliestServiceDate: null,
+        latestServiceDate: null,
+        sha1: null,
+      },
+    });
+    expect(page.items[1]).toMatchObject({
+      authorizationRequired: true,
+      license: { redistributionAllowed: 'no' },
+      realtimeUrls: {
+        vehiclePositions: 'https://example.test/vehicles',
+        alerts: 'https://example.test/alerts',
+      },
+    });
+  });
   it('normalizes license blanks to unknown/null and never fabricates permissive terms', async () => {
     fetchMock.mockResolvedValueOnce(
       okJson({
@@ -214,6 +310,20 @@ describe('TransitlandService.listFeeds', () => {
 });
 
 describe('TransitlandService.getFeed', () => {
+  it('returns a present feed and declares an absent empty-array lookup', async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ feeds: [{ onestop_id: 'f-test', spec: 'GBFS' }] }));
+    expect(await makeService().getFeed('f-test', createMockContext())).toMatchObject({
+      onestopId: 'f-test',
+      spec: 'GBFS',
+    });
+    fetchMock.mockResolvedValueOnce(okJson({}));
+    await expect(
+      makeService().getFeed('f-none', createMockContext(), { reason: 'feed_not_found' }),
+    ).rejects.toMatchObject({
+      code: JsonRpcErrorCode.NotFound,
+      data: { reason: 'feed_not_found' },
+    });
+  });
   it('threads the caller reason and a clean message on an HTTP 404', async () => {
     fetchMock.mockImplementationOnce(() => throwsHttp(JsonRpcErrorCode.NotFound, 'HTTP 404'));
     const err = (await makeService()
@@ -437,6 +547,46 @@ describe('TransitlandService.getDepartures', () => {
 });
 
 describe('TransitlandService error classification', () => {
+  it('initializes the public service accessor and refuses access before setup', async () => {
+    vi.resetModules();
+    const { getTransitlandService, initTransitlandService } = await import(
+      '@/services/transitland/transitland-service.js'
+    );
+    expect(() => getTransitlandService()).toThrow('not initialized');
+    initTransitlandService({} as never, {} as never);
+    fetchMock.mockResolvedValueOnce(okJson({}));
+    expect(await getTransitlandService().listOperators({}, createMockContext())).toEqual({
+      items: [],
+    });
+  });
+  it('reports malformed JSON as SerializationError without retry', async () => {
+    fetchMock.mockResolvedValueOnce({ text: async () => '{bad json' });
+    await expect(makeService().listStops({}, createMockContext())).rejects.toMatchObject({
+      code: JsonRpcErrorCode.SerializationError,
+    });
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+  it.each([
+    ['not found', JsonRpcErrorCode.NotFound],
+    ['Unauthorized', JsonRpcErrorCode.Unauthorized],
+  ])('classifies a 200 error body: %s', async (error, code) => {
+    fetchMock.mockResolvedValueOnce(okJson({ error }));
+    await expect(makeService().listRoutes({}, createMockContext())).rejects.toMatchObject({ code });
+  });
+  it('retries an unexpected error body then returns the successful page', async () => {
+    vi.useFakeTimers();
+    try {
+      fetchMock
+        .mockResolvedValueOnce(okJson({ error: 'temporary failure' }))
+        .mockResolvedValueOnce(okJson({ meta: { after: 8 }, stops: [] }));
+      const result = makeService().listStops({}, createMockContext());
+      await vi.runAllTimersAsync();
+      expect(await result).toEqual({ items: [], after: 8 });
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
   it('maps an upstream 401 (thrown by fetchWithTimeout) to Unauthorized', async () => {
     fetchMock.mockImplementationOnce(() => throwsHttp(JsonRpcErrorCode.Unauthorized, 'HTTP 401'));
     const err = (await makeService()
@@ -452,5 +602,210 @@ describe('TransitlandService error classification', () => {
       .getOperator('o-9q9-bart', createMockContext())
       .catch((e) => e)) as McpError;
     expect(err.code).toBe(JsonRpcErrorCode.NotFound);
+  });
+});
+
+describe('sparse geography and route modes', () => {
+  it('normalizes parent shapes, location types and wheelchair states without losing coordinates', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        stops: [
+          {
+            parent: ' s-parent ',
+            location_type: 1,
+            wheelchair_boarding: 1,
+            geometry: { coordinates: [-122, 47] },
+          },
+          { parent: { onestop_id: 's-parent' }, location_type: 9, wheelchair_boarding: 2 },
+          { parent: null, location_type: 0, wheelchair_boarding: 0 },
+        ],
+      }),
+    );
+    const page = await makeService().listStops({}, createMockContext());
+    expect(
+      page.items.map((s) => [s.parentOnestopId, s.locationTypeLabel, s.wheelchairBoarding]),
+    ).toEqual([
+      ['s-parent', 'station', 'accessible'],
+      ['s-parent', 'type 9', 'not_accessible'],
+      [null, 'stop', 'unknown'],
+    ]);
+    expect(page.items[0]).toMatchObject({ lat: 47, lon: -122 });
+  });
+  it('retains nested departure fallback times and accessibility', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        stops: [
+          {
+            departures: [
+              {
+                departure: {
+                  estimated: '2026-10-13T12:01:00Z',
+                  estimated_local: '2026-10-13T12:01:00Z',
+                  scheduled_utc: '2026-10-13T12:00:00Z',
+                },
+                trip: { wheelchair_accessible: 1 },
+              },
+              {
+                departure: { estimated_utc: '2026-10-13T12:02:00Z' },
+                trip: { wheelchair_accessible: 2 },
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    const result = await makeService().getDepartures('s-test', {}, createMockContext());
+    if (!result.found) throw new Error('expected found');
+    expect(result.result.departures[0]).toMatchObject({
+      realtime: true,
+      scheduledTime: '2026-10-13T12:00:00Z',
+      estimatedTime: '2026-10-13T12:01:00Z',
+      delaySeconds: null,
+      wheelchairAccessible: 'accessible',
+    });
+    expect(result.result.departures[1]).toMatchObject({
+      realtime: true,
+      scheduledTime: '',
+      estimatedTime: '2026-10-13T12:02:00Z',
+      wheelchairAccessible: 'not_accessible',
+    });
+  });
+  const extended = [
+    [100, 117, 'rail'],
+    [200, 209, 'coach'],
+    [400, 404, 'subway'],
+    [405, 405, 'monorail'],
+    [700, 716, 'bus'],
+    [800, 800, 'trolleybus'],
+    [900, 906, 'tram'],
+    [1000, 1000, 'water transport'],
+    [1200, 1200, 'ferry'],
+    [1300, 1307, 'aerial lift'],
+    [1400, 1400, 'funicular'],
+  ] as const;
+  const modes: (readonly [number, string])[] = extended.flatMap(([start, end, mode]) =>
+    Array.from({ length: end - start + 1 }, (_, i) => [start + i, mode] as const),
+  );
+  modes.push(
+    ...[118, 210, 406, 717, 907, 1308, 1100, 1501, 1700].map(
+      (code) => [code, `type ${code}`] as const,
+    ),
+  );
+  it('maps recognized extended families and preserves holes in both paths', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({ routes: modes.map(([route_type]) => ({ route_type })) }),
+    );
+    const routes = await makeService().listRoutes({}, createMockContext());
+    expect(routes.items.map((r) => [r.routeType, r.mode])).toEqual(modes);
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        stops: [{ departures: modes.map(([route_type]) => ({ trip: { route: { route_type } } })) }],
+      }),
+    );
+    const departures = await makeService().getDepartures('s-test', {}, createMockContext());
+    if (!departures.found) throw new Error('expected found');
+    expect(departures.result.departures.map((d) => d.route.mode)).toEqual(
+      modes.map(([, mode]) => mode),
+    );
+  });
+
+  it.each(['listStops', 'listRoutes', 'listOperators'] as const)(
+    'replaces only exact query zeros in %s',
+    async (method) => {
+      for (const [lat, lon, expectedLat, expectedLon] of [
+        [0, -140, '1e-9', '-140'],
+        [37.7, -0, '37.7', '1e-9'],
+        [0, 0, '1e-9', '1e-9'],
+        [1e-12, -1e-12, '1e-12', '-1e-12'],
+      ]) {
+        fetchMock.mockResolvedValueOnce(okJson({}));
+        await makeService()[method](
+          { lat, lon, radius: 0, search: 'test', after: 42 },
+          createMockContext(),
+        );
+        const url = new URL(fetchMock.mock.calls.at(-1)![0]);
+        expect(url.searchParams.get('lat')).toBe(expectedLat);
+        expect(url.searchParams.get('lon')).toBe(expectedLon);
+        expect(url.searchParams.get('radius')).toBe('0');
+        expect(url.searchParams.get('search')).toBe('test');
+        expect(url.searchParams.get('after')).toBe('42');
+      }
+    },
+  );
+  it('characterizes real zero coordinates and basic route modes', async () => {
+    fetchMock.mockResolvedValueOnce(okJson({ stops: [{ geometry: { coordinates: [0, 0] } }] }));
+    expect((await makeService().listStops({}, createMockContext())).items[0]).toMatchObject({
+      lat: 0,
+      lon: 0,
+    });
+    const basics = [
+      [0, 'tram'],
+      [1, 'subway'],
+      [2, 'rail'],
+      [3, 'bus'],
+      [4, 'ferry'],
+      [5, 'cable tram'],
+      [6, 'aerial lift'],
+      [7, 'funicular'],
+      [11, 'trolleybus'],
+      [12, 'monorail'],
+    ] as const;
+    fetchMock.mockResolvedValueOnce(
+      okJson({ routes: basics.map(([route_type]) => ({ route_type })) }),
+    );
+    expect(
+      (await makeService().listRoutes({}, createMockContext())).items.map((r) => r.mode),
+    ).toEqual(basics.map(([, mode]) => mode));
+  });
+
+  it('preserves missing coordinates independently rather than inventing zero', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        stops: [{}, { geometry: null }, { geometry: {} }, { geometry: { coordinates: [0] } }],
+      }),
+    );
+    const page = await makeService().listStops({}, createMockContext());
+    expect(page.items.map((s) => [s.lat, s.lon])).toEqual([
+      [null, null],
+      [null, null],
+      [null, null],
+      [null, 0],
+    ]);
+  });
+
+  it('distinguishes missing types from bus on routes and nested departures', async () => {
+    fetchMock.mockResolvedValueOnce(
+      okJson({ routes: [{}, { route_type: null }, { route_type: 3 }] }),
+    );
+    expect(
+      (await makeService().listRoutes({}, createMockContext())).items.map((r) => [
+        r.routeType,
+        r.mode,
+      ]),
+    ).toEqual([
+      [null, 'unknown'],
+      [null, 'unknown'],
+      [3, 'bus'],
+    ]);
+    fetchMock.mockResolvedValueOnce(
+      okJson({
+        stops: [
+          {
+            departures: [
+              {},
+              { trip: { route: { route_type: null } } },
+              { trip: { route: { route_type: 3 } } },
+            ],
+          },
+        ],
+      }),
+    );
+    const result = await makeService().getDepartures('s-test', {}, createMockContext());
+    if (!result.found) throw new Error('expected found');
+    expect(result.result.departures.map((d) => d.route.mode)).toEqual([
+      'unknown',
+      'unknown',
+      'bus',
+    ]);
   });
 });

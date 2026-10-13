@@ -24,7 +24,13 @@ export const findFeedsTool = tool('transitland_find_feeds', {
         'Restrict to feeds published by this operator (Onestop ID, e.g. "o-9q9-bart"). The reliable way to find a specific agency\'s feeds — get the ID from transitland_find_operators.',
       ),
     spec: z
-      .enum(['gtfs', 'gtfs-rt', 'gbfs', 'mds'])
+      .string()
+      .pipe(
+        z.preprocess(
+          (value) => (typeof value === 'string' ? value.toLowerCase().replace(/_/g, '-') : value),
+          z.enum(['gtfs', 'gtfs-rt', 'gbfs', 'mds']),
+        ),
+      )
       .optional()
       .describe(
         'Filter by feed spec. "gtfs" = static schedule data; "gtfs-rt" = real-time (trip updates, vehicle positions, alerts); "gbfs" = bikeshare/micromobility; "mds" = mobility data spec. Omit to return all specs. The API accepts both lowercase ("gtfs-rt") and uppercase ("GTFS_RT") on input; the output spec is always uppercase (GTFS, GTFS_RT, GBFS, MDS).',
@@ -45,9 +51,10 @@ export const findFeedsTool = tool('transitland_find_feeds', {
       .number()
       .int()
       .min(1)
-      .max(100)
       .default(20)
-      .describe('Maximum feeds to return (max 100). Page further with the after cursor.'),
+      .describe(
+        'Maximum feeds to return. Values above 100 apply the 100-result page cap with a notice. Page further with the after cursor.',
+      ),
     after: z
       .number()
       .int()
@@ -181,7 +188,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
     },
     {
       reason: 'rate_limited',
-      code: JsonRpcErrorCode.ServiceUnavailable,
+      code: JsonRpcErrorCode.RateLimited,
       retryable: true,
       thrownBy: 'service',
       when: 'Transitland returned HTTP 429.',
@@ -190,6 +197,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
   ],
 
   async handler(input, ctx) {
+    const limit = Math.min(input.limit, 100);
     const hasFilter =
       !!input.operator_onestop_id ||
       !!input.spec ||
@@ -206,7 +214,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
     const page = input.operator_onestop_id
       ? await service.listFeedsForOperator(input.operator_onestop_id, ctx, {
           ...(input.spec && { spec: input.spec }),
-          limit: input.limit,
+          limit,
           failReason: { reason: 'operator_not_found' },
         })
       : await service.listFeeds(
@@ -214,21 +222,27 @@ export const findFeedsTool = tool('transitland_find_feeds', {
             spec: input.spec,
             search: input.search,
             fetch_error: input.fetch_error,
-            limit: input.limit,
+            limit,
             after: input.after,
           },
           ctx,
         );
     ctx.enrich.total(page.items.length);
     if (page.after !== undefined) ctx.enrich({ cursor: page.after });
-    if (page.items.length >= input.limit) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: input.limit });
+    if (page.items.length >= limit) {
+      ctx.enrich.truncated({ shown: page.items.length, cap: limit });
     }
+    const capNotice =
+      input.limit > limit
+        ? `Requested ${input.limit} results; applied the ${limit}-result page cap. Narrow the filters or page further with the after cursor when one is returned. `
+        : '';
+    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
     if (page.items.length === 0) {
       ctx.enrich.notice(
-        input.operator_onestop_id
-          ? 'This operator publishes no feeds matching that spec. Drop the spec filter, or check the operator record with transitland_get_operator.'
-          : 'No feeds matched. Find the operator with transitland_find_operators, then pass its operator_onestop_id here to list its feeds.',
+        capNotice +
+          (input.operator_onestop_id
+            ? 'This operator publishes no feeds matching that spec. Drop the spec filter, or check the operator record with transitland_get_operator.'
+            : 'No feeds matched. Find the operator with transitland_find_operators, then pass its operator_onestop_id here to list its feeds.'),
       );
     }
     ctx.log.info('find_feeds resolved', { count: page.items.length });

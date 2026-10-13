@@ -72,8 +72,29 @@ const LOCATION_TYPE_LABELS: Record<number, string> = {
   4: 'boarding area',
 };
 
-function modeForRouteType(routeType: number): string {
-  return ROUTE_TYPE_MODES[routeType] ?? `type ${routeType}`;
+/** Recognized extended families; 400–404 is a coarse urban-rail grouping. */
+const EXTENDED_ROUTE_TYPE_MODES = [
+  [100, 117, 'rail'],
+  [200, 209, 'coach'],
+  [400, 404, 'subway'],
+  [405, 405, 'monorail'],
+  [700, 716, 'bus'],
+  [800, 800, 'trolleybus'],
+  [900, 906, 'tram'],
+  [1000, 1000, 'water transport'],
+  [1200, 1200, 'ferry'],
+  [1300, 1307, 'aerial lift'],
+  [1400, 1400, 'funicular'],
+] as const;
+
+function modeForRouteType(routeType: number | null): string {
+  if (routeType === null) return 'unknown';
+  const basicMode = ROUTE_TYPE_MODES[routeType];
+  if (basicMode !== undefined) return basicMode;
+  for (const [start, end, mode] of EXTENDED_ROUTE_TYPE_MODES) {
+    if (routeType >= start && routeType <= end) return mode;
+  }
+  return `type ${routeType}`;
 }
 
 function locationTypeLabel(locationType: number): string {
@@ -209,7 +230,7 @@ function normalizeFeed(raw: RawFeed): FeedRecord {
 }
 
 function normalizeRoute(raw: RawRoute): RouteRecord {
-  const routeType = raw.route_type ?? 3;
+  const routeType = raw.route_type ?? null;
   return {
     onestopId: blankToNull(raw.onestop_id) ?? '',
     shortName: blankToNull(raw.route_short_name),
@@ -235,8 +256,8 @@ function normalizeStop(raw: RawStop): StopRecord {
     onestopId: blankToNull(raw.onestop_id) ?? '',
     name: blankToNull(raw.stop_name),
     code: blankToNull(raw.stop_code),
-    lat: coords ? coords[1] : 0,
-    lon: coords ? coords[0] : 0,
+    lat: coords?.[1] ?? null,
+    lon: coords?.[0] ?? null,
     locationType,
     locationTypeLabel: locationTypeLabel(locationType),
     wheelchairBoarding: wheelchairState(raw.wheelchair_boarding),
@@ -259,7 +280,7 @@ function normalizeDeparture(raw: RawDeparture): DepartureRecord {
   const time: RawDepartureTime = raw.departure ?? {};
   const realtime = blankToNull(time.estimated ?? time.estimated_utc) !== null;
   const route = raw.trip?.route;
-  const routeType = route?.route_type ?? 3;
+  const routeType = route?.route_type ?? null;
   return {
     realtime,
     scheduleRelationship: blankToNull(raw.schedule_relationship) ?? 'STATIC',
@@ -326,7 +347,9 @@ export class TransitlandService {
     const url = new URL(`${this.baseUrl}${path}`);
     for (const [key, value] of Object.entries(params)) {
       if (value === undefined || value === '') continue;
-      url.searchParams.set(key, String(value));
+      // Transitland treats exact zero point coordinates as an absent filter.
+      const queryValue = (key === 'lat' || key === 'lon') && value === 0 ? 1e-9 : value;
+      url.searchParams.set(key, String(queryValue));
     }
     url.searchParams.set('apikey', this.apiKey);
     return url.toString();
@@ -425,7 +448,7 @@ export class TransitlandService {
     if (code === -32003) {
       return rateLimited(
         'Transitland rate limit hit (HTTP 429). Wait a few seconds and retry; a Pro key raises the quota.',
-        { path },
+        { path, reason: 'rate_limited', retryable: true },
         { cause: err },
       );
     }

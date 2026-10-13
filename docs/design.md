@@ -10,7 +10,7 @@
 | `transitland_get_operator` | Fetch the full operator record by Onestop ID (or internal integer ID): the agencies it covers, the places served, the feeds it publishes, and source tags (Wikidata QID, US NTD ID, social handles). Use when you already hold an operator ID and want the complete record without a search round-trip. | `operator_key` | `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: true` |
 | `transitland_find_feeds` | Discover GTFS, GTFS-Realtime, and GBFS feeds — the open-data catalog. Filter by operator (Onestop ID), feed spec, fetch state, or a search term. Each feed returns its Onestop ID, spec, the fetch URL to download the data, the license terms (redistribution, commercial use, attribution, SPDX where known), and last-fetch freshness. The unique value of this server: where to legally get a place's transit data and on what terms. Discover feeds by operator (reliable) rather than by radius (coarse — feed geometry spans the whole feed). | `operator_onestop_id?`, `spec?`, `search?`, `fetch_error?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
 | `transitland_find_routes` | Find routes near a point, within a bounding box, by operator, or by Onestop ID. Returns route Onestop ID, short and long name, mode (bus, rail, ferry, subway, tram, …), brand color, and the operating agency. Geocode place names to coordinates with `openstreetmap_geocode` before passing `lat`/`lon`. | `lat?`+`lon?`+`radius?`, `bbox?`, `operator_onestop_id?`, `onestop_id?`, `route_type?`, `search?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
-| `transitland_find_stops` | Find stops/stations near a point or within a bounding box, by Onestop ID, or filtered to one operator's network. Returns stop Onestop ID, name, code, coordinates, type (platform vs. station), accessibility, and timezone — the locate-a-stop step before departures. Geocode place names to coordinates with `openstreetmap_geocode` first. Pass a returned stop Onestop ID to `transitland_get_departures`. | `lat?`+`lon?`+`radius?`, `bbox?`, `onestop_id?`, `served_by_onestop_ids?`, `search?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
+| `transitland_find_stops` | Find stops/stations by name search, point/radius, bbox, ID, or operator network. Geocode place names for geographic queries; stop-name search needs no geocoding. Returns nullable coordinates and stop metadata; pass a stop ID to departures. | `lat?`+`lon?`+`radius?`, `bbox?`, `onestop_id?`, `served_by_onestop_ids?`, `search?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
 | `transitland_get_departures` | Departures from a stop by Onestop ID (or internal ID). Returns each departure's route, headsign, trip, and scheduled time — plus the real-time predicted time and delay **only where the feed publishes GTFS-Realtime**. The `realtime` flag and `schedule_relationship` on every departure tell you whether a time is a live prediction or a static timetable entry, so a schedule is never mistaken for a live arrival. Resolve a stop to its Onestop ID with `transitland_find_stops` first. | `stop_key`, `next_seconds?`, `service_date?`, `use_service_window?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
 
 ### Resources
@@ -72,7 +72,7 @@ Single service, single upstream. A thin HTTP client (native `fetch` via the fram
 - Injects `apikey` as a query parameter on every request from `TRANSITLAND_API_KEY`.
 - Exposes one typed method per endpoint: `listOperators`, `getOperator`, `listFeeds`, `getFeed`, `listRoutes`, `listStops`, `getDepartures`.
 - Normalizes the cursor: reads `meta.after`, **discards `meta.next`** (it leaks the key), returns `{ items, after }`.
-- Classifies upstream failures: 401 → `ConfigurationError`/`Unauthorized` (bad key, surfaced once at the edge), 404 → `NotFound`, 429 → retryable `ServiceUnavailable`, 5xx/timeouts → retryable `ServiceUnavailable`.
+- Classifies upstream failures: 401 → `Unauthorized` (bad key), 404 → `NotFound`, 429 → retryable `RateLimited` (-32003) with `reason: rate_limited` and the declared recovery hint; 5xx/timeouts retain the framework classification.
 - Holds no shared state beyond config — no caching primitive needed for v1 (the registry is read-mostly and per-call; add session caching later only if rate limits bite).
 
 No SDK: Transitland publishes no maintained TypeScript client, and the REST surface is a handful of GET endpoints with a flat query-param contract — a direct client is simpler than wrapping a generated one and avoids a dependency. (Decision logged.)
@@ -83,7 +83,7 @@ No SDK: Transitland publishes no maintained TypeScript client, and the REST surf
 |:--------|:---------|
 | Retry boundary | `withRetry` wraps the full fetch+parse pipeline per service method. |
 | Backoff | Rate-limited upstream → 1–2s base delay (matches the free-tier 429 recovery profile). |
-| HTTP status | `fetchWithTimeout` maps non-OK → `ServiceUnavailable`; the service refines 401/404/429 explicitly for better recovery messaging. |
+| HTTP status | `fetchWithTimeout` classifies non-OK status codes; the service refines 401/404/429 for domain recovery messaging. |
 | Parse failure | Transitland returns JSON on success and a `{"error": "..."}` JSON body on 4xx (verified: `{"error":"not found"}`, `{"error":"Unauthorized"}`) — no HTML error pages observed, so parse failures classify as `SerializationError` only on genuinely malformed bodies. |
 
 ### API efficiency
@@ -350,8 +350,8 @@ z.object({
     .describe('Filter to a country by full English name (e.g. "United States of America", "Germany"). Coarse — pair with search or geography to narrow.'),
   adm1_name: z.string().optional()
     .describe('Filter to a state/province/region by full name (e.g. "California"). Use with adm0_name.'),
-  limit: z.number().int().min(1).max(100).default(20)
-    .describe('Maximum operators to return (max 100). Results beyond this are reported via totalCount and the truncation notice; page with the after cursor.'),
+  limit: z.number().int().min(1).default(20)
+    .describe('Maximum operators to return. Values above 100 apply the 100-result page cap with a notice. Page further with the after cursor.'),
   after: z.number().int().optional()
     .describe('Pagination cursor from a previous response (enrichment.cursor). Returns the next page after this internal ID.'),
 })
@@ -385,7 +385,7 @@ z.object({
 
 ```ts
 enrichment: {
-  totalCount: z.number().describe('Total operators matched before the limit.'),
+  totalCount: z.number().describe('Number of operators returned.'),
   cursor: z.number().optional().describe('Pass as `after` to fetch the next page. Present only when more results exist.'),
   truncated: z.boolean().optional().describe('True when results were capped at the limit.'),
   shown: z.number().optional().describe('Number of operators returned.'),
@@ -398,13 +398,13 @@ enrichment: {
 
 ```ts
 errors: [
-  { reason: 'no_filter', code: JsonRpcErrorCode.InvalidParams,
+  { reason: 'no_filter', code: JsonRpcErrorCode.ValidationError,
     when: 'No search, coordinates, bbox, onestop_id, or place filter was provided (server-enforced guard — the API accepts unfiltered requests but returns a paginated global dump)',
     recovery: 'Provide at least one of: search, lat+lon, bbox, onestop_id, or adm0_name. For a place, geocode it with openstreetmap_geocode first.' },
-  { reason: 'incomplete_point', code: JsonRpcErrorCode.InvalidParams,
+  { reason: 'incomplete_point', code: JsonRpcErrorCode.ValidationError,
     when: 'lat without lon or lon without lat',
     recovery: 'Provide both lat and lon together, or use bbox instead for an area.' },
-  { reason: 'rate_limited', code: JsonRpcErrorCode.ServiceUnavailable, retryable: true,
+  { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429 (free-tier rate limit)',
     recovery: 'Wait a few seconds and retry. The free key is rate-limited; a Pro key raises the quota.' },
 ]
@@ -466,7 +466,7 @@ errors: [
   { reason: 'operator_not_found', code: JsonRpcErrorCode.NotFound,
     when: 'No operator exists for the given Onestop ID or internal ID',
     recovery: 'Verify the ID format (e.g. "o-9q9-bart") or search with transitland_find_operators to get a valid Onestop ID.' },
-  { reason: 'rate_limited', code: JsonRpcErrorCode.ServiceUnavailable, retryable: true,
+  { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429',
     recovery: 'Wait a few seconds and retry; the free key is rate-limited.' },
 ]
@@ -488,14 +488,14 @@ The standout tool. Surfaces where to legally get open transit data and on what t
 z.object({
   operator_onestop_id: z.string().optional()
     .describe('Restrict to feeds published by this operator (Onestop ID, e.g. "o-9q9-bart"). The reliable way to find a specific agency\'s feeds — get the ID from transitland_find_operators.'),
-  spec: z.enum(['gtfs', 'gtfs-rt', 'gbfs', 'mds']).optional()
+  spec: z.string().pipe(z.preprocess(value => typeof value === 'string' ? value.toLowerCase().replace(/_/g, '-') : value, z.enum(['gtfs', 'gtfs-rt', 'gbfs', 'mds']))).optional()
     .describe('Filter by feed spec. "gtfs" = static schedule data; "gtfs-rt" = real-time (trip updates, vehicle positions, alerts); "gbfs" = bikeshare/micromobility; "mds" = mobility data spec. Omit to return all specs. Note: the API accepts both lowercase ("gtfs-rt") and uppercase ("GTFS_RT") — the output always returns uppercase (GTFS, GTFS_RT, GBFS, MDS).'),
   search: z.string().optional()
     .describe('Full-text search over feed names and identifiers (e.g. "511 Regional", "MBTA"). Useful when you know a feed by name but not its operator.'),
   fetch_error: z.boolean().optional()
     .describe('When true, return only feeds whose most recent fetch failed (stale/broken sources). When false, only successfully-fetched feeds. Omit for both. Useful for data-quality auditing.'),
-  limit: z.number().int().min(1).max(100).default(20)
-    .describe('Maximum feeds to return (max 100). Page further with the after cursor.'),
+  limit: z.number().int().min(1).default(20)
+    .describe('Maximum feeds to return. Values above 100 apply the 100-result cap with a notice. Page further with the after cursor.'),
   after: z.number().int().optional()
     .describe('Pagination cursor from a previous response (enrichment.cursor).'),
 })
@@ -541,10 +541,10 @@ z.object({
 
 ```ts
 errors: [
-  { reason: 'no_filter', code: JsonRpcErrorCode.InvalidParams,
+  { reason: 'no_filter', code: JsonRpcErrorCode.ValidationError,
     when: 'No operator_onestop_id, spec, search, or fetch_error filter was provided (server-enforced guard — the upstream API accepts unfiltered requests but returns a global firehose)',
     recovery: 'Provide at least one filter — operator_onestop_id (from transitland_find_operators) is the most reliable.' },
-  { reason: 'rate_limited', code: JsonRpcErrorCode.ServiceUnavailable, retryable: true,
+  { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429',
     recovery: 'Wait a few seconds and retry; the free key is rate-limited.' },
 ]
@@ -580,8 +580,8 @@ z.object({
     .describe('GTFS route_type filter: 0=tram/streetcar, 1=subway/metro, 2=rail, 3=bus, 4=ferry, 5=cable tram, 6=aerial lift, 7=funicular, 11=trolleybus, 12=monorail. Omit for all modes.'),
   search: z.string().optional()
     .describe('Full-text search over route short and long names (e.g. "Red Line", "44"). Pair with operator_onestop_id or geography to disambiguate.'),
-  limit: z.number().int().min(1).max(100).default(20)
-    .describe('Maximum routes to return (max 100). Page further with the after cursor.'),
+  limit: z.number().int().min(1).default(20)
+    .describe('Maximum routes to return. Values above 100 apply the 100-result cap with a notice. Page further with the after cursor.'),
   after: z.number().int().optional()
     .describe('Pagination cursor from a previous response (enrichment.cursor).'),
 })
@@ -596,8 +596,8 @@ z.object({
     shortName: z.string().nullable().describe('Route short name/number as shown to riders (e.g. "44", "Red"). Null when the feed omits it.'),
     longName: z.string().nullable().describe('Full route name (e.g. "Harlem - 14th Street"). Null when omitted.'),
     description: z.string().nullable().describe('Route description (e.g. "via Columbus / 7 Av"). Often null.'),
-    routeType: z.number().describe('GTFS route_type integer.'),
-    mode: z.string().describe('Human-readable mode derived from route_type: tram, subway, rail, bus, ferry, cable tram, aerial lift, funicular, trolleybus, monorail, or "type N" for unmapped values.'),
+    routeType: z.number().nullable().describe('GTFS route_type integer. Null when omitted upstream.'),
+    mode: z.string().describe('Basic or recognized extended GTFS mode. Urban rail 400–404 uses subway; unknown for missing type, type N for unmapped present codes.'),
     color: z.string().nullable().describe('Brand color as a hex string without "#" (e.g. "00AEEF"). Null when unspecified.'),
     operator: z.object({
       onestopId: z.string().nullable().describe('Operating agency Onestop ID (e.g. "o-dr5r-nyct"). Use with transitland_get_operator.'),
@@ -614,13 +614,13 @@ z.object({
 
 ```ts
 errors: [
-  { reason: 'no_filter', code: JsonRpcErrorCode.InvalidParams,
+  { reason: 'no_filter', code: JsonRpcErrorCode.ValidationError,
     when: 'No coordinates, bbox, operator, onestop_id, or search provided',
     recovery: 'Provide at least one of: lat+lon, bbox, operator_onestop_id, onestop_id, or search. Geocode place names with openstreetmap_geocode first.' },
-  { reason: 'incomplete_point', code: JsonRpcErrorCode.InvalidParams,
+  { reason: 'incomplete_point', code: JsonRpcErrorCode.ValidationError,
     when: 'lat without lon or lon without lat',
     recovery: 'Provide both lat and lon together, or use bbox for an area.' },
-  { reason: 'rate_limited', code: JsonRpcErrorCode.ServiceUnavailable, retryable: true,
+  { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429',
     recovery: 'Wait a few seconds and retry; the free key is rate-limited.' },
 ]
@@ -632,7 +632,7 @@ errors: [
 
 ### `transitland_find_stops`
 
-**Description:** Find stops and stations near a point or within a bounding box, by Onestop ID, or filtered to one operator's network. Returns each stop's Onestop ID, name, code, coordinates, type (platform vs. station vs. entrance), wheelchair accessibility, and timezone. The locate-a-stop step before departures — pass a returned stop Onestop ID to `transitland_get_departures`. Geocode place names to coordinates with `openstreetmap_geocode` first. Provide at least one of: `lat`+`lon`, `bbox`, `onestop_id`, or `served_by_onestop_ids`.
+**Description:** Find stops and stations by stop-name search, point/radius, bbox, Onestop ID, or operator network. Returns the stop ID, name, code, nullable coordinates, type, accessibility, and timezone. Pass a returned stop ID to `transitland_get_departures`. Provide at least one of: `lat`+`lon`, `bbox`, `onestop_id`, `served_by_onestop_ids`, or `search`. Geocode place names for geographic queries; stop-name search needs no geocoding.
 
 **Input schema:**
 
@@ -652,8 +652,8 @@ z.object({
     .describe('Restrict to stops served by these operators or routes — a comma-separated list of operator/route Onestop IDs (e.g. "o-9q9-bart"). Combine with geography to find an operator\'s stops in an area.'),
   search: z.string().optional()
     .describe('Full-text search over stop names (e.g. "Powell", "Union Station"). Pair with geography to disambiguate common names.'),
-  limit: z.number().int().min(1).max(100).default(20)
-    .describe('Maximum stops to return (max 100). Page further with the after cursor.'),
+  limit: z.number().int().min(1).default(20)
+    .describe('Maximum stops to return. Values above 100 apply the 100-result cap with a notice. Page further with the after cursor.'),
   after: z.number().int().optional()
     .describe('Pagination cursor from a previous response (enrichment.cursor).'),
 })
@@ -667,8 +667,8 @@ z.object({
     onestopId: z.string().describe('Stable public Onestop ID (e.g. "s-9q8yyw3xjw-powell"). Pass to transitland_get_departures.'),
     name: z.string().nullable().describe('Stop/station name. Null for unnamed generic nodes (location_type 3).'),
     code: z.string().nullable().describe('Public stop code printed on signage, when published. Null otherwise.'),
-    lat: z.number().describe('Latitude (WGS84), normalized from the GeoJSON Point.'),
-    lon: z.number().describe('Longitude (WGS84).'),
+    lat: z.number().nullable().describe('Latitude (WGS84). Null when upstream coordinates are missing.'),
+    lon: z.number().nullable().describe('Longitude (WGS84). Null when upstream coordinates are missing.'),
     locationType: z.number().describe('GTFS location_type: 0=platform/stop, 1=station, 2=entrance/exit, 3=generic node, 4=boarding area.'),
     locationTypeLabel: z.string().describe('Human-readable location type: stop, station, entrance, node, or boarding area.'),
     wheelchairBoarding: z.enum(['accessible', 'not_accessible', 'unknown']).describe('Wheelchair accessibility, mapped from GTFS (1/2/0).'),
@@ -689,13 +689,13 @@ z.object({
 
 ```ts
 errors: [
-  { reason: 'no_filter', code: JsonRpcErrorCode.InvalidParams,
-    when: 'No coordinates, bbox, onestop_id, or served_by_onestop_ids provided',
-    recovery: 'Provide at least one of: lat+lon, bbox, onestop_id, or served_by_onestop_ids. Geocode place names with openstreetmap_geocode first.' },
-  { reason: 'incomplete_point', code: JsonRpcErrorCode.InvalidParams,
+  { reason: 'no_filter', code: JsonRpcErrorCode.ValidationError,
+    when: 'No coordinates, bbox, onestop_id, served_by_onestop_ids, or search provided',
+    recovery: 'Provide at least one of: lat+lon, bbox, onestop_id, served_by_onestop_ids, or search. For geographic queries, geocode place names with openstreetmap_geocode first.' },
+  { reason: 'incomplete_point', code: JsonRpcErrorCode.ValidationError,
     when: 'lat without lon or lon without lat',
     recovery: 'Provide both lat and lon together, or use bbox for an area.' },
-  { reason: 'rate_limited', code: JsonRpcErrorCode.ServiceUnavailable, retryable: true,
+  { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429',
     recovery: 'Wait a few seconds and retry; the free key is rate-limited.' },
 ]
@@ -726,8 +726,8 @@ z.object({
     .describe('Restrict to a specific service date (YYYY-MM-DD), e.g. to check a future day\'s schedule. Empty string or omitted uses today. Real-time predictions only apply to the current service day.'),
   use_service_window: z.boolean().default(false)
     .describe('When true, clamp the query into the feed\'s active service window. Set this if a default query returns no departures — some feeds only publish times within their declared calendar window.'),
-  limit: z.number().int().min(1).max(100).default(20)
-    .describe('Maximum departures to return (max 100), ordered by departure time.'),
+  limit: z.number().int().min(1).default(20)
+    .describe('Maximum departures to return. Values above 100 apply the 100-result cap with a notice, ordered by departure time.'),
 })
 ```
 
@@ -751,7 +751,7 @@ z.object({
       onestopId: z.string().describe('Route Onestop ID (e.g. "r-dr72h-m7"). Use with transitland_find_routes.'),
       shortName: z.string().nullable().describe('Route short name/number (e.g. "M7").'),
       longName: z.string().nullable().describe('Route long name.'),
-      mode: z.string().describe('Human-readable mode from route_type (bus, subway, rail, ferry, …).'),
+      mode: z.string().describe('Basic or recognized extended GTFS mode; unknown for missing route_type, type N for unmapped present codes. Urban rail 400–404 uses subway.'),
       color: z.string().nullable().describe('Route brand color hex without "#".'),
     }).describe('The route this departure serves.'),
     operatorName: z.string().nullable().describe('Operating agency name.'),
@@ -782,13 +782,13 @@ errors: [
   { reason: 'stop_not_found', code: JsonRpcErrorCode.NotFound,
     when: 'The stops array in the API response is empty for the given Onestop ID or internal ID — the API returns HTTP 200 + {"stops":[]} (not a 404) when the stop does not exist. The handler must detect this from the empty stops array, not from an HTTP status.',
     recovery: 'Verify the ID (e.g. "s-9q8yyw3xjw-powell") or locate the stop with transitland_find_stops.' },
-  { reason: 'rate_limited', code: JsonRpcErrorCode.ServiceUnavailable, retryable: true,
+  { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429',
     recovery: 'Wait a few seconds and retry; the free key is rate-limited.' },
 ]
 ```
 
-> **IMPLEMENTATION NOTE:** `GET /stops/{key}/departures` returns `HTTP 200` with `{"stops":[]}` for both a valid stop with no departures AND a nonexistent stop. The handler must distinguish these: a valid stop Onestop ID with no departures in the window → return `departures: []` + enrichment notice; an ID that produced no stop record at all (empty stops array on a well-formed Onestop ID like `s-INVALID-notexist`) → throw `stop_not_found`. Strategy: validate that the input is a well-formed Onestop ID (`s-` prefix) or internal int, and treat a completely absent stop record as not found. A pre-flight GET /stops/{key} is an option but costs a round-trip — alternatively, trust the shape: a populated stops entry (even with 0 departures) is valid; a completely absent stops array on a formatted ID is not-found.
+> **IMPLEMENTATION NOTE:** `GET /stops/{key}/departures` returns a populated stop record with an empty `departures` array when the stop exists but has no departures in the window. A completely empty `stops` array means no stop record exists and produces `stop_not_found`. The service distinguishes these response shapes in the single departures request; no pre-flight lookup or additional ID-format guard is needed.
 
 Empty departures is **not** an error — the handler returns `departures: []`, `realtimeAvailable: false`, and an actionable `ctx.enrich.notice(...)` covering the widen-window / child-platform recoveries (the most common real-world cause of an empty result, confirmed during probing on the SF Bay 511 regional feed).
 
@@ -836,7 +836,7 @@ A consolidated single-call "place profile" workflow tool was considered and **de
 
 **Onestop IDs are the surfaced identity, internal IDs accepted on input.** Every ID-bearing input accepts both forms (Transitland's `{key}` path params and `ids`/`*_onestop_id` filters take either); every output surfaces the Onestop ID. Onestop IDs are stable, public, and human-legible (`o-9q9-bart`); internal integers are deployment-mutable and meaningless across instances. This is the single most important output convention.
 
-**Geocode-via-openstreetmap is a hard dependency, surfaced in every geography tool.** Transitland never accepts place names. Rather than silently returning nothing when an agent passes "Seattle", every geography-capable tool's description names `openstreetmap_geocode` as the required pre-step, and a `no_filter`/empty-result `notice` repeats it. The two servers compose: OSM resolves place → coordinates, Transitland resolves coordinates → transit.
+**Geocode place names for geographic queries.** `openstreetmap_geocode` resolves place → coordinates before Transitland resolves coordinates → transit. Operator/route/stop name searches accept `search` directly and need no geocoding.
 
 **The feed registry leads.** `find_feeds` is the one capability no other fleet server has — license + fetch URL + freshness for open transit data. Its description and output lean into "where do I legally get this data and on what terms." License fields are normalized to explicit `yes`/`no`/`unknown` (or null) and the schema descriptions forbid inferring a permissive license from a blank registry field — honesty about uncertainty over fabricated confidence.
 
@@ -909,9 +909,21 @@ A consolidated single-call "place profile" workflow tool was considered and **de
 | 7 | funicular |
 | 11 | trolleybus |
 | 12 | monorail |
+| 100–117 | rail |
+| 200–209 | coach |
+| 400–404 | subway (coarse urban-rail grouping) |
+| 405 | monorail |
+| 700–716 | bus |
+| 800 | trolleybus |
+| 900–906 | tram |
+| 1000 | water transport |
+| 1200 | ferry |
+| 1300–1307 | aerial lift |
+| 1400 | funicular |
+| absent/null | unknown |
 | other | `type N` |
 
-(Extended GTFS route types in the 100–1700 range exist; map the common ones above and fall back to `type N` for the rest.)
+Recognized families follow the [extended GTFS route-type table](https://developers.google.com/transit/gtfs/reference/extended-route-types). Undefined holes and other present codes keep `type N`; route records retain the raw integer. Missing route types are null, never fabricated bus values.
 
 ### GTFS enum mappings
 
@@ -938,11 +950,14 @@ The geohash segment (`9q9`) encodes location; it makes IDs roughly sortable by g
 
 | Date | Decision | Rationale |
 |:-----|:---------|:----------|
+| 2026-10-13 | Preserve missing stop coordinates and route types as null; render missing modes as unknown | Missing upstream facts must remain distinct from genuine zero coordinates and bus routes. |
+| 2026-10-13 | Replace exact-zero query latitude/longitude with positive 1e-9 degrees at URL serialization | Transitland treats zero as an absent point filter. Bounded controls verified this adjustment restores filtering on stops, routes, and operators; it shifts each axis by at most about 0.112 mm, preserves all nonzero values and output coordinates, and makes no broader operator-proximity guarantee. Radius zero remains an approximation. |
+| 2026-10-13 | Normalize recognized feed-spec case and underscore/hyphen variants before enum validation | API output such as GTFS_RT can be reused as input; invalid values still reject before upstream work. |
 | 2026-06-13 | Six REST-shaped tools mirroring the operator→feed→route→stop→departure hierarchy | The hierarchy is the user's mental model; no aggregation or mode-consolidation needed for a single flat-contract upstream. |
 | 2026-06-13 | Surface Onestop IDs everywhere; accept Onestop or internal int IDs on input | Onestop IDs are stable, public, legible across deployments; internal integers are instance-mutable and meaningless across instances. |
 | 2026-06-13 | `find_feeds` is the lead capability; license normalized to yes/no/unknown, never inferred | The open-data catalog (fetch URL + license + freshness) is unique to Transitland in the fleet; blank registry fields must read as "unknown," not fabricated permissive terms. |
 | 2026-06-13 | `get_departures` sets per-departure `realtime` + `schedule_relationship` + top-level `realtimeAvailable` | A scheduled time and a GTFS-RT prediction are indistinguishable to an agent unless the server marks them; confirmed `estimated`/`estimated_delay` present-iff-RT against NYC MTA live data. |
-| 2026-06-13 | Geocode-via-`openstreetmap_geocode` named in every geography tool description + empty-result notice | Transitland never accepts place names; surfacing the dependency prevents the silent-empty failure when an agent passes a city name. |
+| 2026-06-13 | Name `openstreetmap_geocode` as a pre-step for geographic queries | Transitland takes coordinates rather than place names; direct operator/route/stop name searches need no geocoding. |
 | 2026-06-13 | Direct HTTP client, no SDK | No maintained TS SDK exists; the REST surface is a few GETs with flat query params — a direct client is simpler and dependency-free. |
 | 2026-06-13 | Never surface `meta.next`; return only the integer `after` cursor | The `meta.next` URL embeds the apikey in plaintext (verified) — leaking it to the client/logs is a credential exposure. |
 | 2026-06-13 | Slice feeds to the latest `feed_version` (`feed_versions.limit=1`) | Default response returns the entire version history (167 entries for BART); only current freshness is agent-relevant. |
@@ -976,7 +991,7 @@ The geohash segment (`9q9`) encodes location; it makes IDs roughly sortable by g
 | 2 | Tool Specs — `get_departures` real-time note | The "The real-time test" paragraph mentioned `CANCELED`/`ADDED` as surfaced relationships but gave no explanation of `STATIC` vs `SCHEDULED` — which is the actual primary RT indicator. Implementors would have built the wrong classifier. | Rewrote the real-time paragraph to explain `STATIC` = no RT overlay, `SCHEDULED` = RT active. |
 | 3 | Tool Specs — `get_departures` output schema | `scheduleRelationship` described as `SCHEDULED, ADDED, CANCELED, UNSCHEDULED, or DUPLICATED` — wrong, `STATIC` was absent. | Updated `.describe()` text to list all six observed values with correct semantics. |
 | 4 | Tool Specs — `get_departures` error contract (`stop_not_found`) | The error's `when` clause implied it triggers on a 404. The API returns HTTP 200 + `{"stops":[]}` for nonexistent stops (verified: `s-INVALID-notexist` → `{"stops":[]}` with HTTP 200). An implementation watching for a 404 would never throw `stop_not_found` — all invalid stop IDs would silently return empty departures. | Rewrote `when` clause to name the HTTP 200 + empty-array behavior, and added an IMPLEMENTATION NOTE explaining the detection strategy. |
-| 5 | Tool Specs — `find_feeds` `spec` enum | The input enum `['gtfs', 'gtfs-rt', 'gbfs', 'mds']` is lowercase; API output is always uppercase (`GTFS`, `GTFS_RT`, `GBFS`, `MDS`). No note on the mismatch — an implementor reading the output schema would find `spec: z.string()` and see `GTFS_RT` in the actual response, but nothing in the input enum description warned them the shapes differ. | Added a note to the `.describe()` text clarifying that the API accepts both cases on input, and output is always uppercase. |
+| 5 | Tool Specs — `find_feeds` `spec` | API output uses uppercase specs such as `GTFS_RT`, while handlers use canonical lowercase values. | Case-fold and replace underscores with hyphens before enum validation; publish a string input schema that accepts the advertised variants. Unknown values still reject. |
 | 6 | Tool Specs — `no_filter` error contracts | Three tools (`find_operators`, `find_routes`, `find_stops`) and `find_feeds` declare `no_filter` errors. The upstream API accepts all four endpoints with no filters (verified with live requests — all returned data). The error contracts as written implied this was an API constraint, which would have caused confusion when the service layer implemented it. | Clarified `when` text on each `no_filter` entry: "server-enforced guard — the API accepts unfiltered requests." |
 | 7 | Implementation Order | Listed `createApp()` identity as `name`/`title` = `transitland-mcp-server`, `websiteUrl` the repo. Fleet identity rule: `createApp()` identity block is `name` + `title` ONLY — no `websiteUrl`/`description` (those belong in `package.json`/`server.json`). | Fixed the Implementation Order step to state `name` + `title` ONLY. |
 | 8 | API Reference — departures endpoint | Listed params as `next(seconds)`. Both `next` and `next_seconds` work (verified), but the canonical API param is `next`. The tool input parameter is named `next_seconds` (for clarity), but the service layer must send `next`. The reference was ambiguous about which name the service sends. | Updated the API Reference table row to note both names are accepted; service sends `next`. |
@@ -991,6 +1006,6 @@ The geohash segment (`9q9`) encodes location; it makes IDs roughly sortable by g
 - **`served_by_onestop_ids` param name** — verified correct for stops endpoint.
 - **`operator_onestop_id` param for routes** — verified: correct param name, returns results.
 - **`feed_versions.limit=1` efficiency** — response shape confirmed: the default returns full history (167 entries for BART); slicing to 1 is correct.
-- **`spec` API accepts lowercase** — `gtfs`, `gtfs-rt`, `gbfs` all return results; uppercase also accepted. Input enum of lowercase values is fine.
+- **`spec` accepts lowercase and uppercase** — recognized inputs normalize to the lowercase canonical enum before validation; the advertised string schema permits uppercase API-output forms such as `GTFS_RT`.
 - **Tool count and resource count** — 6 tools (including `get_operator`), 2 resources. Design says "All six tools" in the services section; count is accurate.
 - **Geocode-delegation to openstreetmap** — correct; Transitland does not geocode place names (verified: no geocoding param exists on any endpoint).

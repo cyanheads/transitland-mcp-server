@@ -298,17 +298,17 @@ export interface RouteRecord {
     onestopId: string | null;
     name: string;
   };
-  routeType: number;
+  routeType: number | null;
   shortName: string | null;
 }
 
 export interface StopRecord {
   code: string | null;
   feedOnestopId: string | null;
-  lat: number;
+  lat: number | null;
   locationType: number;
   locationTypeLabel: string;
-  lon: number;
+  lon: number | null;
   name: string | null;
   onestopId: string;
   parentOnestopId: string | null;

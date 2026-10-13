@@ -90,7 +90,7 @@ export const getOperatorTool = tool('transitland_get_operator', {
     },
     {
       reason: 'rate_limited',
-      code: JsonRpcErrorCode.ServiceUnavailable,
+      code: JsonRpcErrorCode.RateLimited,
       retryable: true,
       thrownBy: 'service',
       when: 'Transitland returned HTTP 429.',

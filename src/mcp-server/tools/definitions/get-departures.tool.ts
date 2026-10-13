@@ -52,9 +52,10 @@ export const getDeparturesTool = tool('transitland_get_departures', {
       .number()
       .int()
       .min(1)
-      .max(100)
       .default(20)
-      .describe('Maximum departures to return (max 100), ordered by departure time.'),
+      .describe(
+        'Maximum departures to return, ordered by departure time. Values above 100 apply the 100-result cap with a notice.',
+      ),
   }),
   output: z.object({
     stop: z
@@ -115,7 +116,9 @@ export const getDeparturesTool = tool('transitland_get_departures', {
                 longName: z.string().nullable().describe('Route long name.'),
                 mode: z
                   .string()
-                  .describe('Human-readable mode from route_type (bus, subway, rail, ferry, …).'),
+                  .describe(
+                    'Basic or recognized extended GTFS mode (bus, subway, rail, coach, water transport, ferry, …). Urban rail 400–404 uses subway. "unknown" when route_type is missing; "type N" for unmapped present codes.',
+                  ),
                 color: z.string().nullable().describe('Route brand color hex without "#".'),
               })
               .describe('The route this departure serves.'),
@@ -168,7 +171,7 @@ export const getDeparturesTool = tool('transitland_get_departures', {
     },
     {
       reason: 'rate_limited',
-      code: JsonRpcErrorCode.ServiceUnavailable,
+      code: JsonRpcErrorCode.RateLimited,
       retryable: true,
       thrownBy: 'service',
       when: 'Transitland returned HTTP 429.',
@@ -177,11 +180,12 @@ export const getDeparturesTool = tool('transitland_get_departures', {
   ],
 
   async handler(input, ctx) {
+    const limit = Math.min(input.limit, 100);
     // The API uses `next` (seconds) as the look-ahead param; both `next` and
     // `next_seconds` are accepted upstream — send the canonical `next`.
     const params: Record<string, string | number | boolean | undefined> = {
       next: input.next_seconds,
-      limit: input.limit,
+      limit,
       use_service_window: input.use_service_window,
     };
     if (input.service_date) params.service_date = input.service_date;
@@ -195,12 +199,17 @@ export const getDeparturesTool = tool('transitland_get_departures', {
 
     const { result } = response;
     ctx.enrich.total(result.departures.length);
-    if (result.departures.length >= input.limit) {
-      ctx.enrich.truncated({ shown: result.departures.length, cap: input.limit });
+    if (result.departures.length >= limit) {
+      ctx.enrich.truncated({ shown: result.departures.length, cap: limit });
     }
+    const capNotice =
+      input.limit > limit
+        ? `Requested ${input.limit} departures; applied the ${limit}-result cap. Narrow the service date or look-ahead window for a smaller set. `
+        : '';
+    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
     if (result.departures.length === 0) {
       ctx.enrich.notice(
-        `No departures in the next ${input.next_seconds}s. Widen next_seconds or set use_service_window=true (some feeds only expose times inside their service window). A parent station may have no direct departures — try a child platform from transitland_find_stops.`,
+        `${capNotice}No departures in the next ${input.next_seconds}s. Widen next_seconds or set use_service_window=true (some feeds only expose times inside their service window). A parent station may have no direct departures — try a child platform from transitland_find_stops.`,
       );
     }
     ctx.log.info('get_departures resolved', {

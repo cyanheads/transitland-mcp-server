@@ -12,7 +12,7 @@ import { getTransitlandService } from '@/services/transitland/transitland-servic
 export const findStopsTool = tool('transitland_find_stops', {
   title: 'transitland-mcp-server: find stops',
   description:
-    "Find stops and stations near a point or within a bounding box, by Onestop ID, or filtered to one operator's network. Returns each stop's Onestop ID, name, code, coordinates, type (platform vs. station vs. entrance), wheelchair accessibility, and timezone. The locate-a-stop step before departures — pass a returned stop Onestop ID to transitland_get_departures. Geocode place names to coordinates with openstreetmap_geocode first. Provide at least one of: lat+lon, bbox, onestop_id, or served_by_onestop_ids.",
+    "Find stops and stations by stop-name search, near a point or within a bounding box, by Onestop ID, or filtered to one operator's network. Returns each stop's Onestop ID, name, code, coordinates, type (platform vs. station vs. entrance), wheelchair accessibility, and timezone. The locate-a-stop step before departures — pass a returned stop Onestop ID to transitland_get_departures. For geographic queries, geocode place names to coordinates with openstreetmap_geocode first; stop-name search needs no geocoding. Provide at least one of: lat+lon, bbox, onestop_id, served_by_onestop_ids, or search.",
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     lat: z
@@ -65,9 +65,10 @@ export const findStopsTool = tool('transitland_find_stops', {
       .number()
       .int()
       .min(1)
-      .max(100)
       .default(20)
-      .describe('Maximum stops to return (max 100). Page further with the after cursor.'),
+      .describe(
+        'Maximum stops to return. Values above 100 apply the 100-result page cap with a notice. Page further with the after cursor.',
+      ),
     after: z
       .number()
       .int()
@@ -92,8 +93,14 @@ export const findStopsTool = tool('transitland_find_stops', {
               .string()
               .nullable()
               .describe('Public stop code printed on signage, when published. Null otherwise.'),
-            lat: z.number().describe('Latitude (WGS84), normalized from the GeoJSON Point.'),
-            lon: z.number().describe('Longitude (WGS84).'),
+            lat: z
+              .number()
+              .nullable()
+              .describe('Latitude (WGS84). Null when upstream coordinates are missing.'),
+            lon: z
+              .number()
+              .nullable()
+              .describe('Longitude (WGS84). Null when upstream coordinates are missing.'),
             locationType: z
               .number()
               .describe(
@@ -153,9 +160,9 @@ export const findStopsTool = tool('transitland_find_stops', {
     {
       reason: 'no_filter',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'No coordinates, bbox, onestop_id, or served_by_onestop_ids provided (server-enforced guard — the API accepts unfiltered requests but returns a global dump).',
+      when: 'No coordinates, bbox, onestop_id, served_by_onestop_ids, or search provided (server-enforced guard — the API accepts unfiltered requests but returns a global dump).',
       recovery:
-        'Provide at least one of: lat+lon, bbox, onestop_id, or served_by_onestop_ids. Geocode place names with openstreetmap_geocode first.',
+        'Provide at least one of: lat+lon, bbox, onestop_id, served_by_onestop_ids, or search. For geographic queries, geocode place names with openstreetmap_geocode first.',
     },
     {
       reason: 'incomplete_point',
@@ -165,7 +172,7 @@ export const findStopsTool = tool('transitland_find_stops', {
     },
     {
       reason: 'rate_limited',
-      code: JsonRpcErrorCode.ServiceUnavailable,
+      code: JsonRpcErrorCode.RateLimited,
       retryable: true,
       thrownBy: 'service',
       when: 'Transitland returned HTTP 429.',
@@ -174,6 +181,7 @@ export const findStopsTool = tool('transitland_find_stops', {
   ],
 
   async handler(input, ctx) {
+    const limit = Math.min(input.limit, 100);
     if ((input.lat === undefined) !== (input.lon === undefined)) {
       throw ctx.fail('incomplete_point');
     }
@@ -189,7 +197,7 @@ export const findStopsTool = tool('transitland_find_stops', {
     }
 
     const params: Record<string, string | number | boolean | undefined> = {
-      limit: input.limit,
+      limit,
       bbox: input.bbox,
       onestop_id: input.onestop_id,
       served_by_onestop_ids: input.served_by_onestop_ids,
@@ -205,12 +213,17 @@ export const findStopsTool = tool('transitland_find_stops', {
     const page = await getTransitlandService().listStops(params, ctx);
     ctx.enrich.total(page.items.length);
     if (page.after !== undefined) ctx.enrich({ cursor: page.after });
-    if (page.items.length >= input.limit) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: input.limit });
+    if (page.items.length >= limit) {
+      ctx.enrich.truncated({ shown: page.items.length, cap: limit });
     }
+    const capNotice =
+      input.limit > limit
+        ? `Requested ${input.limit} results; applied the ${limit}-result page cap. Page further with the after cursor when one is returned. `
+        : '';
+    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
     if (page.items.length === 0) {
       ctx.enrich.notice(
-        'No stops matched. If you passed a place name, geocode it with openstreetmap_geocode first. Otherwise widen the radius or check the served_by_onestop_ids list.',
+        `${capNotice}No stops matched. Broaden the stop-name search or add geography to disambiguate. For geographic queries, geocode place names with openstreetmap_geocode first, widen the radius, or check the served_by_onestop_ids list.`,
       );
     }
     ctx.log.info('find_stops resolved', { count: page.items.length });
@@ -226,7 +239,7 @@ export const findStopsTool = tool('transitland_find_stops', {
       lines.push(`## ${stop.name ?? '(unnamed)'} — ${stop.locationTypeLabel}`);
       lines.push(`**Onestop ID:** ${stop.onestopId}`);
       lines.push(`**Location type:** ${stop.locationTypeLabel} (${stop.locationType})`);
-      lines.push(`**Coordinates:** ${stop.lat}, ${stop.lon}`);
+      lines.push(`**Coordinates:** ${stop.lat ?? 'unknown'}, ${stop.lon ?? 'unknown'}`);
       lines.push(`**Code:** ${stop.code ?? 'Not available'}`);
       lines.push(`**Wheelchair:** ${stop.wheelchairBoarding}`);
       lines.push(`**Timezone:** ${stop.timezone ?? 'Not available'}`);
