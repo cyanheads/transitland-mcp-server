@@ -3,6 +3,13 @@
 /.claude/
 /.agents/
 /framework-skills/
+/src/
+/scripts/
+/tests/
+/coverage/
+/handoffs/
+/CLAUDE.md
+/AGENTS.md
 /docs/idea.md
 /logs/
 /.cache/
