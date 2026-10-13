@@ -1,6 +1,6 @@
 # transitland-mcp-server - Directory Structure
 
-Generated on: 2026-10-07 12:33:08
+Generated on: 2026-10-13 12:44:29
 
 ```text
 transitland-mcp-server/
@@ -25,6 +25,7 @@ transitland-mcp-server/
 │   └── settings.json
 ├── changelog/
 │   ├── 0.1.x/
+│   ├── 0.2.x/
 │   └── template.md
 ├── docs/
 │   └── design.md
@@ -161,8 +162,10 @@ transitland-mcp-server/
 │   │   └── transitland-tools.fuzz.test.ts
 │   ├── integration/
 │   │   ├── operator-contract.int.test.ts
+│   │   ├── page-limit.int.test.ts
 │   │   ├── recovery-contract.int.test.ts
-│   │   └── session-mode.int.test.ts
+│   │   ├── session-mode.int.test.ts
+│   │   └── upstream-contract.int.test.ts
 │   ├── resources/
 │   │   └── resources.test.ts
 │   ├── services/
