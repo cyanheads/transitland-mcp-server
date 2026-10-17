@@ -23,7 +23,7 @@
 
 ## Overview
 
-Transit data from the Transitland v2 registry — the open aggregator of GTFS, GTFS-Realtime, and GBFS feeds from thousands of transit operators worldwide. Find operators, discover feeds and their license terms, and look up routes, stops, and real-time-aware departures from any MCP client. Runs as a stdio process or a local Streamable HTTP server.
+Transit data for thousands of operators worldwide from Transitland, the open aggregator of GTFS, GTFS-Realtime, and GBFS feeds. Find operators and their feeds, and look up routes, stops, and real-time departures.
 
 ### Tools
 
@@ -49,14 +49,13 @@ All resource data is also reachable via tools (`transitland_get_operator`, `tran
 
 ## Capability reference
 
-Page limits default to 20 and apply a 100-result cap. A larger `limit` carries a requested/applied-cap notice; `truncated`, `shown`, and `cap` appear when the returned page reaches the applied limit. Empty or short pages do not claim truncation. Use the returned `after` cursor where available to continue.
+Page limits default to 20 and are capped at 100. A larger `limit` is clamped with a notice, and `truncated`, `shown`, and `cap` appear when a page hits the limit. Use the returned `after` cursor to continue.
 
 ### `transitland_find_operators` <sub>tool</sub>
 
 - Filter by `search` (name), `lat`+`lon`+`radius` (max 100,000m, default 1,000m), `bbox`, `onestop_id`, or `adm0_name`/`adm1_name` (country/region) — at least one required, or the call fails as `no_filter`
-- Returns each operator's Onestop ID, name, places served, published feeds (a `GTFS_RT` entry signals real-time departures may be available), and Wikidata QID
 - `lat` requires `lon` and vice versa, or the call fails as `incomplete_point`
-- `limit` caps at 100 (default 20), paginated via the `after` cursor
+- Returns each operator's Onestop ID, name, places served, published feeds (a `GTFS_RT` entry signals real-time departures may be available), and Wikidata QID
 
 ---
 
@@ -64,65 +63,55 @@ Page limits default to 20 and apply a 100-result cap. A larger `limit` carries a
 
 - Accepts an Onestop ID (e.g. `o-9q9-bart`) or an internal integer ID
 - Returns agencies (each with places served), published feeds, and source tags: Wikidata QID, US NTD ID, general Twitter/X handle
-- Idempotent single-record lookup; mirrored by the `transitland://operator/{onestop_id}` resource
 - `operator_not_found` when the ID doesn't resolve
 
 ---
 
 ### `transitland_find_feeds` <sub>tool</sub>
 
-- Filter by `operator_onestop_id` (from `transitland_find_operators` — the reliable path to one agency's feeds), `spec` (`gtfs`/`gtfs-rt`/`gbfs`/`mds`), `search`, or `fetch_error` — at least one required. Spec input accepts case and underscore/hyphen variants such as `GTFS_RT`; unknown specs still reject
-- Each feed returns its fetch URL, real-time endpoints when present, and license terms — redistribution, commercial use, derived products, and attribution as explicit `yes`/`no`/`unknown` (never inferred from a blank field), plus SPDX identifier and attribution text where known
-- Freshness: last-fetch timestamp, content hash, and the calendar window the current data covers
-- `authorizationRequired` flags feeds whose download needs a separate key/registration
-- `limit` caps at 100 (default 20), paginated via `after`
+- Filter by `operator_onestop_id` (from `transitland_find_operators`), `spec` (`gtfs`/`gtfs-rt`/`gbfs`/`mds`; case and underscore/hyphen variants such as `GTFS_RT` are accepted), `search`, or `fetch_error` — at least one required
+- Each feed returns its fetch URL, real-time endpoints, freshness (last fetch, content hash, calendar window covered), and license terms — redistribution, commercial use, derived products, and attribution as `yes`/`no`/`unknown`, never inferred from a blank field — plus SPDX identifier and attribution text where known
+- `authorizationRequired` flags feeds whose download needs a separate key or registration
 
 ---
 
 ### `transitland_find_routes` <sub>tool</sub>
 
 - Filter by `lat`+`lon`+`radius` (max 50,000m, default 1,000m), `bbox`, `operator_onestop_id`, `onestop_id`, `route_type` (GTFS mode integer), or `search` — at least one required
-- Returns short/long name, basic and recognized extended GTFS modes (bus, subway, rail, coach, water transport, ferry, tram, …), brand color, operating agency's Onestop ID, and source feed's Onestop ID. Missing route type is `null` with mode `unknown`; unsupported present codes remain `type N`
-- Scheduled (GTFS static) route definitions, not live vehicle positions
 - `lat` requires `lon` and vice versa, or the call fails as `incomplete_point`
-- `limit` caps at 100 (default 20), paginated via `after`
+- Returns short/long name, GTFS mode (bus, subway, rail, ferry, tram, …), brand color, and the operating agency's and source feed's Onestop IDs. A missing route type is `null` with mode `unknown`
+- Scheduled (GTFS static) route definitions, not live vehicle positions
 
 ---
 
 ### `transitland_find_stops` <sub>tool</sub>
 
-- Filter by `lat`+`lon`+`radius` (max 10,000m, default 500m), `bbox`, `onestop_id`, `served_by_onestop_ids` (comma-separated operator/route Onestop IDs), or stop-name `search` — at least one required. Name searches need no geocoding; geocode place names for geographic queries
-- Returns coordinates (`null` when missing upstream; real zero is preserved), `location_type` with a label (stop, station, entrance, node, boarding area), wheelchair accessibility, timezone, and the parent station's Onestop ID for child platforms
-- Departures attach to platform-level stops (`location_type` 0) — a station may return none; use its child platforms
-- `limit` caps at 100 (default 20), paginated via `after`
+- Filter by `lat`+`lon`+`radius` (max 10,000m, default 500m), `bbox`, `onestop_id`, `served_by_onestop_ids` (comma-separated operator/route Onestop IDs), or stop-name `search` — at least one required. Name searches need no geocoding
+- Returns coordinates (`null` when missing upstream), `location_type` with a label (stop, station, entrance, node, boarding area), wheelchair accessibility, timezone, and the parent station's Onestop ID for child platforms
+- Departures attach to platform-level stops (`location_type` 0) — a station may return none, so use its child platforms
 
 ---
 
 ### `transitland_get_departures` <sub>tool</sub>
 
-- Resolve a stop to its Onestop ID with `transitland_find_stops` first
-- Every departure carries a `realtime` flag — `true` for a live GTFS-Realtime prediction, `false` for a static scheduled time — plus a `scheduleRelationship` (`STATIC`, `SCHEDULED`, `ADDED`, `CANCELED`, `UNSCHEDULED`, `DUPLICATED`)
-- Returns scheduled and (when real-time) estimated times with delay in seconds, route, headsign, mode, trip, direction, and accessibility
-- Top-level `realtimeAvailable` reports whether the stop's feed publishes GTFS-RT at all
-- `next_seconds` look-ahead window: 60–86,400 (default 3,600); widen it or set `use_service_window: true` when a stop returns nothing
-- `stop_not_found` when the stop doesn't resolve — detected from an empty upstream array, not an HTTP 404
+- Resolve a stop to its Onestop ID with `transitland_find_stops` first; `stop_not_found` when it doesn't resolve. `next_seconds` sets the look-ahead window: 60–86,400 (default 3,600) — widen it or set `use_service_window: true` when a stop returns nothing
+- Every departure carries a `realtime` flag (`true` for a live GTFS-Realtime prediction, `false` for a scheduled time) and a `scheduleRelationship` (`STATIC`, `SCHEDULED`, `ADDED`, `CANCELED`, `UNSCHEDULED`, `DUPLICATED`)
+- Also returns scheduled and estimated times with delay in seconds, route, headsign, mode, trip, direction, and accessibility; top-level `realtimeAvailable` reports whether the stop's feed publishes GTFS-RT at all
 
 ---
 
 ### `transitland://operator/{onestop_id}` <sub>resource</sub>
 
-- Mirrors `transitland_get_operator` — agencies, places served, published feeds, and source tags (Wikidata QID, US NTD ID, Twitter/X handle)
-- `onestop_id` param accepts an Onestop ID (e.g. `o-9q9-bart`) or internal integer ID
-- `operator_not_found` when the ID doesn't resolve
+- Mirrors `transitland_get_operator` — agencies, places served, published feeds, and source tags
+- `onestop_id` accepts an Onestop ID (e.g. `o-9q9-bart`) or internal integer ID; `operator_not_found` when it doesn't resolve
 
 ---
 
 ### `transitland://feed/{onestop_id}` <sub>resource</sub>
 
-- Mirrors a single-feed result from `transitland_find_feeds` — spec, fetch URL, real-time endpoints, license terms, and latest-fetch freshness
-- `onestop_id` param accepts a feed Onestop ID (e.g. `f-9q9-bart`) or internal integer ID
-- License fields normalize blank registry values to `unknown`/null — never inferred as permissive
-- `feed_not_found` when the ID doesn't resolve
+- Mirrors a single-feed result from `transitland_find_feeds` — spec, fetch URL, real-time endpoints, license terms, and freshness
+- `onestop_id` accepts a feed Onestop ID (e.g. `f-9q9-bart`) or internal integer ID; `feed_not_found` when it doesn't resolve
+- Blank license fields come back as `unknown`/null, never inferred as permissive
 
 ## Features
 
@@ -132,15 +121,15 @@ Transitland-specific:
 
 - Direct HTTP client for the Transitland v2 REST API — no SDK dependency, a flat query-param contract over a handful of GET endpoints
 - Onestop IDs (`o-`/`f-`/`r-`/`s-`) are the identifier spine — surfaced in every result, accepted on input alongside internal integer IDs
-- Feed-version history sliced to the latest version (the raw endpoint returns the entire fetch log — 167 entries for BART), so a feed lookup returns current freshness, not a multi-year history
-- Coverage polygons and route/stop geometry omitted by default — a compact country/region/city place summary instead
+- Feed lookups return only the latest feed version's freshness, not the full fetch history
+- Coverage polygons and route/stop geometry are omitted; results carry a compact country/region/city place summary instead
 
 Agent-friendly output:
 
-- The real-time distinction is structural — a per-departure `realtime` boolean and `scheduleRelationship`, plus a top-level `realtimeAvailable`, so an agent branches on data, never on parsing a timestamp
-- License terms surfaced honestly — blank registry fields normalize to `unknown`/null and are never inferred as permissive; the schema descriptions tell agents to confirm against the license URL before redistributing
-- The pagination `meta.next` URL embeds the API key in plaintext; the service discards it and surfaces only the opaque integer `after` cursor, so the key never reaches tool output or logs
-- Empty results return data plus an actionable notice (geocode-first, widen the window, try a child platform) rather than an error
+- Real-time status is explicit: per-departure `realtime` and `scheduleRelationship`, plus a top-level `realtimeAvailable`
+- Blank license fields come back as `unknown`/null, never inferred as permissive, and agents are told to confirm against the license URL before redistributing
+- Upstream pagination URLs embed the API key; only the opaque `after` cursor is surfaced, so the key never reaches tool output or logs
+- Empty results return an actionable notice (geocode first, widen the window, try a child platform) rather than an error
 
 ## Getting started
 
@@ -254,13 +243,13 @@ All configuration is validated at startup via Zod schemas in `src/config/server-
 | `MCP_AUTH_MODE` | Authentication mode: `none`, `jwt`, or `oauth`. | `none` |
 | `MCP_LOG_LEVEL` | Log level (`debug`, `info`, `notice`, `warning`, `error`). | `info` |
 | `LOGS_DIR` | Directory for log files (Node.js only). | `<project-root>/logs` |
-| `LOG_TOOL_FAILURE_PAYLOADS` | Log failed calls' arguments and result, redacted by key name and capped by `LOG_TOOL_FAILURE_PAYLOAD_MAX_BYTES` (default `16384`). Secrets in free-form values remain. | `false` |
+| `LOG_TOOL_FAILURE_PAYLOADS` | Log failed calls' arguments and result, redacted by key name (secrets in free-form values remain). Size capped by `LOG_TOOL_FAILURE_PAYLOAD_MAX_BYTES` (default `16384`). | `false` |
 | `STORAGE_PROVIDER_TYPE` | Storage backend: `in-memory`, `filesystem`, `supabase`, `cloudflare-kv/r2/d1`. | `in-memory` |
 | `OTEL_ENABLED` | Enable [OpenTelemetry instrumentation](https://github.com/cyanheads/mcp-ts-core/tree/main/docs/telemetry) (spans, metrics, completion logs). | `false` |
 
 See [`.env.example`](./.env.example) for the full list of optional overrides.
 
-The server declares stateless HTTP sessions in source. A meaningful `MCP_SESSION_MODE` overrides that declaration; an empty value or a whole-value `${…}` placeholder leaves it in effect.
+HTTP sessions are stateless by default; set `MCP_SESSION_MODE` to override.
 
 ## Running the server
 
