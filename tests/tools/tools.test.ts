@@ -6,9 +6,11 @@
  * @module tests/tools/tools.test
  */
 
+import { z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
-import { createMockContext, getEnrichment } from '@cyanheads/mcp-ts-core/testing';
+import { createMockContext, getEnrichment, runToolContract } from '@cyanheads/mcp-ts-core/testing';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { bboxSchema, normalizeBbox } from '@/mcp-server/shared/bbox-schema.js';
 
 const service = {
   listOperators: vi.fn(),
@@ -33,6 +35,221 @@ const { getDeparturesTool } = await import('@/mcp-server/tools/definitions/get-d
 
 beforeEach(() => {
   for (const fn of Object.values(service)) fn.mockReset();
+});
+
+describe('revised tool contracts', () => {
+  it.each([
+    ['', undefined],
+    ['  ', undefined],
+    [' -1.2234e2, +47.60, -122.33, 47.62 ', '-1.2234e2,+47.60,-122.33,47.62'],
+    ['-180,-90,+180,+90', '-180,-90,+180,+90'],
+    ['-.5,0,.5,0.', '-.5,0,.5,0.'],
+  ])('accepts bbox %j', (input, expected) => {
+    expect(normalizeBbox(bboxSchema.parse(input))).toBe(expected);
+  });
+
+  it.each([
+    'not-a-bbox',
+    '1,2,3',
+    '1,2,3,4,5',
+    '1,,2,3',
+    '0x01,2,3,4',
+    '47.60,-122.34,47.62,-122.33',
+    '1,0,0,1',
+    '0,1,1,0',
+    '-1e309,0,1,1',
+    '0,0,181,1',
+    '0,0,1,91',
+    'NaN,0,1,1',
+  ])('rejects bbox %j with coordinate order guidance', (input) => {
+    expect(bboxSchema.safeParse(input).error?.issues[0]?.message).toContain(
+      'minLon,minLat,maxLon,maxLat',
+    );
+  });
+
+  it('advertises the bbox pattern in JSON Schema', () => {
+    expect(z.toJSONSchema(findStopsTool.input)).toMatchObject({
+      properties: { bbox: { type: 'string', pattern: expect.any(String) } },
+    });
+  });
+
+  it.each([
+    [findOperatorsTool, service.listOperators],
+    [findRoutesTool, service.listRoutes],
+    [findStopsTool, service.listStops],
+  ] as const)(
+    '$name validates bbox before querying and retains point intersection',
+    async (tool, list) => {
+      const invalid = await runToolContract(tool, { bbox: 'not-a-bbox' });
+      expect(invalid.structuredContent).toMatchObject({
+        error: { code: JsonRpcErrorCode.InvalidParams, data: { reason: 'invalid_arguments' } },
+      });
+      expect(list).not.toHaveBeenCalled();
+
+      list.mockResolvedValueOnce({ items: [] });
+      const bbox = '-1.2234e2,47.6,-122.33,47.62';
+      const valid = await runToolContract(tool, { bbox, lat: 40.75, lon: -73.98 });
+      expect(valid.structuredContent).toMatchObject({ totalCount: 0 });
+      expect(list).toHaveBeenCalledWith(
+        expect.objectContaining({ bbox, lat: 40.75, lon: -73.98 }),
+        expect.anything(),
+      );
+    },
+  );
+
+  it('permits exact feed lookup alone', async () => {
+    service.listFeeds.mockResolvedValueOnce({ items: [] });
+    const result = await runToolContract(findFeedsTool, { onestop_id: 'f-c29-communitytransit' });
+    expect(result.structuredContent).toMatchObject({ feeds: [], totalCount: 0 });
+    expect(service.listFeeds).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onestop_id: 'f-c29-communitytransit',
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('passes every operator feed filter and composes its single-page notice', async () => {
+    service.listFeedsForOperator.mockResolvedValueOnce({
+      items: [],
+      notices: ['Feed reference missing.'],
+    });
+    const result = await runToolContract(findFeedsTool, {
+      operator_onestop_id: 'o-test',
+      onestop_id: 'f-test',
+      spec: 'gtfs',
+      search: 'Test',
+      fetch_error: false,
+      limit: 101,
+      after: 42,
+    });
+    expect(service.listFeedsForOperator).toHaveBeenCalledWith(
+      'o-test',
+      expect.anything(),
+      expect.objectContaining({
+        onestop_id: 'f-test',
+        spec: 'gtfs',
+        search: 'Test',
+        fetch_error: false,
+        limit: 100,
+      }),
+    );
+    expect(result.structuredContent).toMatchObject({
+      feeds: [],
+      notice: expect.stringMatching(/Feed reference missing.*101.*after.*ignored/i),
+    });
+    expect(result.structuredContent).not.toHaveProperty('cursor');
+  });
+
+  it('retains parent resolution notices on an exhausted page', async () => {
+    service.listStops.mockResolvedValueOnce({ items: [], notices: ['Parent lookup unavailable.'] });
+    const result = await runToolContract(findStopsTool, { search: 'Test', after: 42, limit: 101 });
+    expect(result.structuredContent).toMatchObject({
+      stops: [],
+      notice: expect.stringMatching(/Parent lookup unavailable.*101.*exhausted/i),
+    });
+    const content = result.content
+      .map((block) => (block.type === 'text' ? block.text : ''))
+      .join('\n');
+    expect(content).toContain('No stops on this page.');
+    expect(content).not.toContain('openstreetmap');
+  });
+
+  it('uses the numeric-operator notice without suggesting geocoding', async () => {
+    service.listOperators.mockResolvedValueOnce({
+      items: [],
+      notices: ['Use an operator Onestop ID.'],
+    });
+    const result = await runToolContract(findOperatorsTool, { onestop_id: '14490042' });
+    expect(result.structuredContent).toMatchObject({
+      operators: [],
+      notice: 'Use an operator Onestop ID.',
+    });
+    expect(service.listOperators).toHaveBeenCalledWith(
+      expect.objectContaining({
+        onestop_id: '14490042',
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('rejects impossible dates and a start time without a service date before I/O', async () => {
+    const impossible = await runToolContract(getDeparturesTool, {
+      stop_key: 's-test',
+      service_date: '2026-02-30',
+    });
+    expect(impossible.structuredContent).toMatchObject({
+      error: { code: JsonRpcErrorCode.InvalidParams, data: { reason: 'invalid_arguments' } },
+    });
+    const noDate = await runToolContract(getDeparturesTool, {
+      stop_key: 's-test',
+      start_time: '23:00:00',
+    });
+    expect(noDate.structuredContent).toMatchObject({
+      error: {
+        code: JsonRpcErrorCode.ValidationError,
+        data: {
+          reason: 'start_time_requires_service_date',
+          recovery: { hint: expect.stringContaining('service_date') },
+        },
+      },
+    });
+    expect(service.getDepartures).not.toHaveBeenCalled();
+  });
+
+  it('sends an explicit-date window across midnight without next', async () => {
+    service.getDepartures.mockResolvedValueOnce({
+      found: true,
+      result: {
+        stop: { onestopId: 's-test', name: null, timezone: null },
+        departures: [],
+        realtimeAvailable: false,
+        alerts: [],
+      },
+    });
+    const result = await runToolContract(getDeparturesTool, {
+      stop_key: 's-test',
+      service_date: '2028-02-29',
+      start_time: '23:00:00',
+      next_seconds: 10800,
+      use_service_window: true,
+    });
+    expect(service.getDepartures.mock.calls[0]?.[1]).toEqual({
+      service_date: '2028-02-29',
+      start_time: '23:00:00',
+      end_time: '26:00:00',
+      limit: 20,
+      use_service_window: true,
+    });
+    expect(result.structuredContent).toMatchObject({
+      alerts: [],
+      notice: expect.stringContaining('2028-02-29'),
+    });
+  });
+
+  it.each([
+    { service_date: '', expected: { next: 3600 } },
+    { service_date: '2026-11-14', expected: { service_date: '2026-11-14' } },
+  ])('selects query mode for service_date=$service_date', async ({ service_date, expected }) => {
+    service.getDepartures.mockResolvedValueOnce({
+      found: true,
+      result: {
+        stop: { onestopId: 's-test', name: null, timezone: null },
+        departures: [],
+        realtimeAvailable: false,
+        alerts: [],
+      },
+    });
+    const result = await runToolContract(getDeparturesTool, { stop_key: 's-test', service_date });
+    expect(service.getDepartures.mock.calls[0]?.[1]).toEqual({
+      ...expected,
+      limit: 20,
+      use_service_window: false,
+    });
+    expect(result.structuredContent).toMatchObject({
+      notice: expect.stringContaining(service_date || 'in the next 3600s'),
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -91,7 +308,7 @@ describe('transitland_find_operators', () => {
     const ctx = createMockContext({ errors: findOperatorsTool.errors });
     const input = findOperatorsTool.input.parse({ search: 'nowhere' });
     await findOperatorsTool.handler(input, ctx);
-    expect(String(getEnrichment(ctx).notice)).toMatch(/openstreetmap_geocode/);
+    expect(String(getEnrichment(ctx).notice)).toMatch(/openstreetmap_search_places/);
   });
 
   it('format renders the onestop ID and feed name', () => {
@@ -201,6 +418,8 @@ describe('transitland_find_feeds', () => {
       commercialUseAllowed: 'unknown' as const,
       createDerivedProduct: 'unknown' as const,
       useWithoutAttribution: 'yes' as const,
+      shareAlikeOptional: 'unknown' as const,
+      attributionInstructions: null,
       attributionText: null,
     },
     latestFetch: {
@@ -343,6 +562,8 @@ describe('transitland_find_stops', () => {
     onestopId: 's-9q8yyw3xjw-powell',
     name: 'Powell',
     code: null,
+    platformCode: null,
+    description: null,
     lat: 37.78459,
     lon: -122.40737,
     locationType: 1,
@@ -398,6 +619,8 @@ describe('transitland_get_departures', () => {
     scheduledTime: '2026-06-13T16:21:07-04:00',
     estimatedTime: '2026-06-13T17:01:39-04:00',
     delaySeconds: 2432,
+    serviceDate: '2026-06-13',
+    platform: { onestopId: 's-1', code: null },
     headsign: '14 ST via 7 AV',
     route: {
       onestopId: 'r-dr72h-m7',
@@ -418,6 +641,7 @@ describe('transitland_get_departures', () => {
       result: {
         stop: { onestopId: 's-1', name: '7 AV', timezone: 'America/New_York' },
         departures: [rtDeparture],
+        alerts: [],
         realtimeAvailable: true,
       },
     });
@@ -451,6 +675,7 @@ describe('transitland_get_departures', () => {
       result: {
         stop: { onestopId: 's-1', name: 'Quiet', timezone: 'America/New_York' },
         departures: [],
+        alerts: [],
         realtimeAvailable: false,
       },
     });
@@ -465,11 +690,72 @@ describe('transitland_get_departures', () => {
     const blocks = getDeparturesTool.format!({
       stop: { onestopId: 's-1', name: '7 AV', timezone: 'America/New_York' },
       departures: [rtDeparture],
+      alerts: [],
       realtimeAvailable: true,
     });
     const text = blocks.map((b) => (b.type === 'text' ? b.text : '')).join('');
     expect(text).toContain('Yes (live prediction)');
     expect(text).toContain('Harlem - 14th Street');
     expect(text).toContain('r-dr72h-m7');
+  });
+
+  it('preserves service dates, platform fields and separately scoped alerts', async () => {
+    const stopAlert = {
+      header: 'Station access',
+      description: 'Use entrance B.\r\nThen go down.\rWait here.\nThe sign reads &#13;.',
+      url: 'https://example.com/access',
+      effect: 'ACCESSIBILITY_ISSUE',
+      cause: null,
+      severity: 'WARNING',
+      activePeriods: [{ start: '2026-06-13T15:00:00Z', end: null }],
+    };
+    const tripAlert = {
+      ...stopAlert,
+      header: 'Trip rerouted',
+      description: 'Runs via Pine.',
+      url: null,
+      effect: 'DETOUR',
+      cause: 'CONSTRUCTION',
+      activePeriods: [],
+    };
+    const stop = { onestopId: 's-1', name: '7 AV', timezone: 'America/New_York' };
+    const departure = {
+      ...rtDeparture,
+      serviceDate: '2026-06-12',
+      platform: { onestopId: 's-platform', code: '2' },
+      alerts: [tripAlert],
+    };
+    service.getDepartures.mockResolvedValueOnce({
+      found: true,
+      result: { stop, departures: [departure], realtimeAvailable: true, alerts: [stopAlert] },
+    });
+    const result = await runToolContract(getDeparturesTool, { stop_key: 's-1' });
+    expect(result.structuredContent).toMatchObject({
+      alerts: [stopAlert],
+      departures: [departure],
+    });
+    const text = result.content
+      .flatMap((block) => (block.type === 'text' ? [block.text] : []))
+      .join('\n');
+    expect(text).toContain('Station access');
+    expect(text).toContain(
+      'Use entrance B.&#13;\\\nThen go down.&#13;Wait here.\\\nThe sign reads \\&#13;.',
+    );
+    expect(text).toContain('[https://example.com/access](<https://example.com/access>)');
+    expect(text).toContain('2026-06-13T15:00:00Z → Not available');
+    expect(text).toContain('**Trip alerts**');
+    expect(text).toContain('Trip rerouted');
+    expect(text).toContain('**Platform:** s-platform · **Platform code:** 2');
+    expect(text).toContain('**Service date:** 2026-06-12');
+
+    service.getDepartures.mockResolvedValueOnce({
+      found: true,
+      result: { stop, departures: [], realtimeAvailable: false, alerts: [stopAlert] },
+    });
+    const empty = await runToolContract(getDeparturesTool, { stop_key: 's-1' });
+    expect(empty.structuredContent).toMatchObject({ alerts: [stopAlert], departures: [] });
+    expect(empty.content).toContainEqual(
+      expect.objectContaining({ text: expect.stringContaining('Station access') }),
+    );
   });
 });

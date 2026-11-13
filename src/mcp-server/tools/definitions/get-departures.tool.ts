@@ -7,19 +7,74 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { formatUrl, formatValue } from '@/mcp-server/shared/format-value.js';
 import { getTransitlandService } from '@/services/transitland/transitland-service.js';
+import type { AlertRecord } from '@/services/transitland/types.js';
+
+const alertSchema = z
+  .object({
+    header: z.string().nullable().describe('Alert headline.'),
+    description: z.string().nullable().describe('Alert details.'),
+    url: z.string().nullable().describe('Link for more information.'),
+    effect: z.string().nullable().describe('GTFS-Realtime effect.'),
+    cause: z.string().nullable().describe('GTFS-Realtime cause.'),
+    severity: z.string().nullable().describe('GTFS-Realtime severity level.'),
+    activePeriods: z
+      .array(
+        z
+          .object({
+            start: z
+              .string()
+              .nullable()
+              .describe('ISO 8601 start of the period, or null if open-ended.'),
+            end: z
+              .string()
+              .nullable()
+              .describe('ISO 8601 end of the period, or null if open-ended.'),
+          })
+          .describe('An active period with optional start and end times.'),
+      )
+      .describe('Periods when the alert applies.'),
+  })
+  .describe('A GTFS-Realtime service alert.');
+
+function formatAlerts(alerts: AlertRecord[]): string[] {
+  return alerts.flatMap((alert) => [
+    '',
+    `**Alert:** ${formatValue(alert.header)}`,
+    `**Description:** ${formatValue(alert.description)}`,
+    `**URL:** ${formatUrl(alert.url)}`,
+    `**Effect:** ${formatValue(alert.effect)} · **Cause:** ${formatValue(alert.cause)} · **Severity:** ${formatValue(alert.severity)}`,
+    ...alert.activePeriods.map(
+      ({ start, end }) => `**Active period:** ${formatValue(start)} → ${formatValue(end)}`,
+    ),
+  ]);
+}
+
+/** Add whole hours to decimal GTFS hours while preserving their width. */
+function addHours(hours: string, extraHours: number): string {
+  const suffix: number[] = [];
+  let index = hours.length;
+  while (extraHours > 0 && index > 0) {
+    index--;
+    const sum = hours.charCodeAt(index) - 48 + extraHours;
+    suffix.push(sum % 10);
+    extraHours = Math.floor(sum / 10);
+  }
+  return `${extraHours || ''}${hours.slice(0, index)}${suffix.reverse().join('')}`;
+}
 
 export const getDeparturesTool = tool('transitland_get_departures', {
   title: 'transitland-mcp-server: get departures',
   description:
-    "Departures from a stop by Onestop ID or internal ID. Returns each upcoming departure's route, headsign, trip, and scheduled time — plus the real-time predicted time and delay only where the feed publishes GTFS-Realtime. Every departure carries a realtime flag and a schedule_relationship so a static timetable entry is never mistaken for a live arrival, and cancellations/added trips are visible. Resolve a stop to its Onestop ID with transitland_find_stops first. Departures attach to platform-level stops; a parent station may return none — query its child platforms. If a stop returns no departures, widen next_seconds or set use_service_window: true (some feeds only expose times inside their active service window).",
+    'Get departures and GTFS-Realtime service alerts for a stop or station. Find its Onestop ID with transitland_find_stops. A station result combines its own departures with those of its platforms. Each departure shows its route, headsign, trip, platform, service date, and scheduled time. Use realtime=true to identify live predictions and scheduleRelationship to identify cancellations or added trips. Omit service_date for departures from now or provide it for a specific service day.',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     stop_key: z
       .string()
       .min(1)
       .describe(
-        'Stop Onestop ID (e.g. "s-9q8yyw3xjw-powell") or internal integer ID. Get one from transitland_find_stops. Use a platform-level stop (location_type 0); a station may return no departures.',
+        'Stop, station, or platform Onestop ID (e.g. "s-9q8yyw3xjw-powell") or internal integer ID. Find it with transitland_find_stops.',
       ),
     next_seconds: z
       .number()
@@ -28,25 +83,29 @@ export const getDeparturesTool = tool('transitland_get_departures', {
       .max(86400)
       .default(3600)
       .describe(
-        'Look-ahead window in seconds from now (max 86,400 = 24h). Default 3600 (1h). Widen when a stop has infrequent service or returns nothing.',
+        'Window in seconds from now, or from start_time when supplied. Default 3600 (1h), maximum 86400 (24h). Ignored when service_date is supplied without start_time.',
       ),
     service_date: z
-      .union([
-        z.literal(''),
-        z
-          .string()
-          .regex(/^\d{4}-\d{2}-\d{2}$/)
-          .describe('Service date as YYYY-MM-DD'),
-      ])
+      .union([z.literal(''), z.iso.date().describe('Service date as YYYY-MM-DD')])
       .optional()
       .describe(
-        "Restrict to a specific service date (YYYY-MM-DD), e.g. to check a future day's schedule. Empty string or omitted uses today. Real-time predictions only apply to the current service day.",
+        'Request a particular GTFS service date (YYYY-MM-DD), starting at its first departure by default. Omit or pass an empty string for the current-time window.',
+      ),
+    start_time: z
+      .string()
+      .regex(
+        /^\d{2,}:[0-5]\d:[0-5]\d$/,
+        'Expected GTFS time HH:MM:SS with minutes and seconds from 00 to 59.',
+      )
+      .optional()
+      .describe(
+        'Start of the requested service window as GTFS HH:MM:SS. Requires service_date. Hours can exceed 23.',
       ),
     use_service_window: z
       .boolean()
       .default(false)
       .describe(
-        "When true, clamp the query into the feed's active service window. Set this if a default query returns no departures — some feeds only publish times within their declared calendar window.",
+        "When true, allow Transitland to fall back to a typical service day outside the feed's calendar window.",
       ),
     limit: z
       .number()
@@ -68,6 +127,9 @@ export const getDeparturesTool = tool('transitland_get_departures', {
           .describe('IANA timezone the departure wall-clock times are in.'),
       })
       .describe('The stop the departures belong to.'),
+    alerts: z
+      .array(alertSchema)
+      .describe('Service alerts for the stop and its returned child stops.'),
     departures: z
       .array(
         z
@@ -87,6 +149,25 @@ export const getDeparturesTool = tool('transitland_get_departures', {
               .describe(
                 'Scheduled departure as an ISO 8601 timestamp with the stop\'s UTC offset (e.g. "2026-06-13T16:21:07-04:00").',
               ),
+            serviceDate: z
+              .string()
+              .nullable()
+              .describe(
+                'GTFS service date supplied by Transitland, including for trips after calendar midnight.',
+              ),
+            platform: z
+              .object({
+                onestopId: z
+                  .string()
+                  .nullable()
+                  .describe('Onestop ID of the stop or platform supplying this departure.'),
+                code: z.string().nullable().describe('Platform code when published.'),
+              })
+              .describe('Boarding location for this departure.'),
+            alerts: z
+              .array(alertSchema)
+              .optional()
+              .describe('Service alerts associated with this trip, when present.'),
             estimatedTime: z
               .string()
               .nullable()
@@ -137,31 +218,32 @@ export const getDeparturesTool = tool('transitland_get_departures', {
               .enum(['accessible', 'not_accessible', 'unknown'])
               .describe('Trip-level wheelchair accessibility, where the feed states it.'),
           })
-          .describe(
-            'A single upcoming departure (scheduled, with a live prediction when realtime=true).',
-          ),
+          .describe('A single departure with a live prediction when realtime=true.'),
       )
       .describe(
-        'Upcoming departures ordered by departure time. A mix of realtime=true and realtime=false entries is normal — only the GTFS-RT-covered trips carry predictions.',
+        'Departures ordered by estimated or scheduled departure instant. Both live predictions and scheduled times can appear.',
       ),
     realtimeAvailable: z
       .boolean()
-      .describe(
-        "True when at least one departure carried a real-time prediction — i.e. this stop's feed publishes GTFS-RT. False implies all times are scheduled.",
-      ),
+      .describe('True when at least one returned departure carries a real-time prediction.'),
   }),
   enrichment: {
     totalCount: z
       .number()
-      .describe(
-        'Number of departures returned (the API caps server-side; this is the count in the window).',
-      ),
+      .describe('Number of departures returned after merging and capping the available rows.'),
     truncated: z.boolean().optional().describe('True when departures were capped at the limit.'),
     shown: z.number().optional().describe('Number of departures returned.'),
     cap: z.number().optional().describe('The limit applied.'),
     notice: z.string().optional().describe('Guidance when no departures were found.'),
   },
   errors: [
+    {
+      reason: 'start_time_requires_service_date',
+      code: JsonRpcErrorCode.ValidationError,
+      when: 'start_time is supplied without a service_date.',
+      recovery:
+        'Provide a service_date with start_time or omit start_time for departures from now.',
+    },
     {
       reason: 'stop_not_found',
       code: JsonRpcErrorCode.NotFound,
@@ -180,15 +262,31 @@ export const getDeparturesTool = tool('transitland_get_departures', {
   ],
 
   async handler(input, ctx) {
+    const { service_date, start_time, next_seconds } = input;
+    if (start_time && !service_date) {
+      throw ctx.fail('start_time_requires_service_date');
+    }
     const limit = Math.min(input.limit, 100);
-    // The API uses `next` (seconds) as the look-ahead param; both `next` and
-    // `next_seconds` are accepted upstream — send the canonical `next`.
     const params: Record<string, string | number | boolean | undefined> = {
-      next: input.next_seconds,
       limit,
       use_service_window: input.use_service_window,
     };
-    if (input.service_date) params.service_date = input.service_date;
+    if (service_date) {
+      params.service_date = service_date;
+      if (start_time) {
+        const hours = start_time.slice(0, -6);
+        const minutes = Number(start_time.slice(-5, -3));
+        const seconds = Number(start_time.slice(-2));
+        const offsetSeconds = minutes * 60 + seconds + next_seconds;
+        const endHours = addHours(hours, Math.floor(offsetSeconds / 3600));
+        const endMinutes = String(Math.floor(offsetSeconds / 60) % 60).padStart(2, '0');
+        const endSeconds = String(offsetSeconds % 60).padStart(2, '0');
+        params.start_time = start_time;
+        params.end_time = `${endHours}:${endMinutes}:${endSeconds}`;
+      }
+    } else {
+      params.next = next_seconds;
+    }
 
     const response = await getTransitlandService().getDepartures(input.stop_key, params, ctx);
     if (!response.found) {
@@ -208,9 +306,15 @@ export const getDeparturesTool = tool('transitland_get_departures', {
         : '';
     if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
     if (result.departures.length === 0) {
-      ctx.enrich.notice(
-        `${capNotice}No departures in the next ${input.next_seconds}s. Widen next_seconds or set use_service_window=true (some feeds only expose times inside their service window). A parent station may have no direct departures — try a child platform from transitland_find_stops.`,
-      );
+      const window = service_date
+        ? start_time
+          ? `on service date ${service_date} between ${start_time} and ${params.end_time}. Try a different start_time or widen next_seconds.`
+          : `on service date ${service_date}. Try a different service_date.`
+        : `in the next ${next_seconds}s. Widen next_seconds or choose a service_date.`;
+      const fallback = input.use_service_window
+        ? ''
+        : ' Set use_service_window=true to allow a typical-service fallback.';
+      ctx.enrich.notice(`${capNotice}No departures ${window}${fallback}`);
     }
     ctx.log.info('get_departures resolved', {
       stopKey: input.stop_key,
@@ -222,37 +326,50 @@ export const getDeparturesTool = tool('transitland_get_departures', {
 
   format: (result) => {
     const lines: string[] = [];
-    lines.push(`## Departures — ${result.stop.name ?? result.stop.onestopId}`);
-    lines.push(`**Onestop ID:** ${result.stop.onestopId}`);
-    lines.push(`**Timezone:** ${result.stop.timezone ?? 'Not available'}`);
+    lines.push('## Departures');
+    lines.push(`**Stop:** ${formatValue(result.stop.name)}`);
+    lines.push(`**Onestop ID:** ${formatValue(result.stop.onestopId)}`);
+    lines.push(`**Timezone:** ${formatValue(result.stop.timezone)}`);
     lines.push(
       `**Real-time available:** ${result.realtimeAvailable ? 'Yes (GTFS-RT)' : 'No (scheduled only)'}`,
     );
+    if (result.alerts.length > 0) {
+      lines.push('', '### Stop alerts');
+      for (const line of formatAlerts(result.alerts)) lines.push(line);
+    }
     if (result.departures.length === 0) {
       lines.push('', 'No departures in the requested window.');
       return [{ type: 'text', text: lines.join('\n') }];
     }
     lines.push('');
     for (const dep of result.departures) {
-      const label = dep.route.shortName ?? dep.route.longName ?? dep.route.onestopId;
       const time = dep.realtime ? (dep.estimatedTime ?? dep.scheduledTime) : dep.scheduledTime;
-      lines.push(`### ${label} → ${dep.headsign ?? '(no headsign)'}`);
-      lines.push(`**Route name:** ${dep.route.longName ?? dep.route.shortName ?? 'Not available'}`);
+      lines.push(`**Headsign:** ${formatValue(dep.headsign)}`);
+      lines.push(`**Route short name:** ${formatValue(dep.route.shortName)}`);
+      lines.push(`**Route name:** ${formatValue(dep.route.longName)}`);
       lines.push(`**Realtime:** ${dep.realtime ? 'Yes (live prediction)' : 'No (scheduled)'}`);
-      lines.push(`**Time:** ${time}`);
-      lines.push(`**Scheduled:** ${dep.scheduledTime}`);
-      lines.push(`**Estimated:** ${dep.estimatedTime ?? 'Not available'}`);
+      lines.push(`**Time:** ${formatValue(time)}`);
+      lines.push(`**Scheduled:** ${formatValue(dep.scheduledTime)}`);
+      lines.push(`**Estimated:** ${formatValue(dep.estimatedTime)}`);
+      lines.push(`**Service date:** ${formatValue(dep.serviceDate)}`);
+      lines.push(
+        `**Platform:** ${formatValue(dep.platform.onestopId)} · **Platform code:** ${formatValue(dep.platform.code)}`,
+      );
       lines.push(
         `**Delay:** ${dep.delaySeconds == null ? 'Not available' : `${dep.delaySeconds}s`}`,
       );
-      lines.push(`**Schedule relationship:** ${dep.scheduleRelationship}`);
+      lines.push(`**Schedule relationship:** ${formatValue(dep.scheduleRelationship)}`);
       lines.push(
-        `**Route:** ${dep.route.onestopId} · ${dep.route.mode} · ${dep.route.color ? `#${dep.route.color}` : 'no color'}`,
+        `**Route:** ${formatValue(dep.route.onestopId)} · ${formatValue(dep.route.mode)} · ${dep.route.color ? `#${formatValue(dep.route.color)}` : 'no color'}`,
       );
-      lines.push(`**Operator:** ${dep.operatorName ?? 'Not available'}`);
+      lines.push(`**Operator:** ${formatValue(dep.operatorName)}`);
       lines.push(
-        `**Trip:** ${dep.tripId ?? 'Not available'} · direction ${dep.directionId ?? 'n/a'} · wheelchair ${dep.wheelchairAccessible}`,
+        `**Trip:** ${formatValue(dep.tripId)} · direction ${dep.directionId ?? 'n/a'} · wheelchair ${dep.wheelchairAccessible}`,
       );
+      if (dep.alerts?.length) {
+        lines.push('', '**Trip alerts**');
+        for (const line of formatAlerts(dep.alerts)) lines.push(line);
+      }
       lines.push('');
     }
     return [{ type: 'text', text: lines.join('\n').trimEnd() }];

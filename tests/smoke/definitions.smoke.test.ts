@@ -46,6 +46,7 @@ const operatorRecord = {
 
 const operatorSummary = {
   ...operatorRecord,
+  wikidataId: 'Q610120',
   places: [{ country: 'United States of America', region: 'California', city: 'Oakland' }],
 };
 
@@ -62,6 +63,8 @@ const feedRecord = {
     commercialUseAllowed: 'unknown',
     createDerivedProduct: 'unknown',
     useWithoutAttribution: 'unknown',
+    shareAlikeOptional: 'unknown',
+    attributionInstructions: null,
     attributionText: null,
   },
   latestFetch: { fetchedAt: null, earliestServiceDate: null, latestServiceDate: null, sha1: null },
@@ -99,6 +102,8 @@ describe('definition smoke test', () => {
           onestopId: 's-9q8yyw3xjw-powell',
           name: 'Powell St',
           code: null,
+          platformCode: null,
+          description: null,
           lat: 37.784,
           lon: -122.408,
           locationType: 0,
@@ -126,6 +131,8 @@ describe('definition smoke test', () => {
             scheduledTime: '2026-08-21T12:00:00-07:00',
             estimatedTime: '2026-08-21T12:01:30-07:00',
             delaySeconds: 90,
+            serviceDate: '2026-08-21',
+            platform: { onestopId: 's-9q8yyw3xjw-powell', code: null },
             headsign: 'Richmond',
             route: {
               onestopId: 'r-9q9-bart-6',
@@ -141,6 +148,7 @@ describe('definition smoke test', () => {
           },
         ],
         realtimeAvailable: true,
+        alerts: [],
       },
     });
 

@@ -1,6 +1,6 @@
 /**
  * @fileoverview transitland://feed/{onestop_id} — feed record by Onestop ID: spec,
- * fetch URL, license, latest-fetch freshness. The catalog entry for one feed. Mirrors a
+ * fetch URL, license, and feed-version metadata. The catalog entry for one feed. Mirrors a
  * single-feed lookup from transitland_find_feeds.
  * @module mcp-server/resources/definitions/feed.resource
  */
@@ -15,7 +15,7 @@ export const feedResource = resource('transitland://feed/{onestop_id}', {
   name: 'transitland-feed',
   title: 'transitland-mcp-server: feed record',
   description:
-    'Feed record by Onestop ID — spec, fetch URL, license terms, and latest-fetch freshness. The open-data catalog entry for one feed. Mirrors a single-feed result from transitland_find_feeds.',
+    'Feed record by Onestop ID — spec, fetch URL, license terms, and selected feed-version metadata. The open-data catalog entry for one feed. Mirrors a single-feed result from transitland_find_feeds.',
   mimeType: 'application/json',
   params: z.object({
     onestop_id: z
@@ -30,7 +30,7 @@ export const feedResource = resource('transitland://feed/{onestop_id}', {
     fetchUrl: z
       .string()
       .nullable()
-      .describe('Direct URL to download the current feed data. Null when the registry has none.'),
+      .describe('Download or discovery URL for this feed spec. Null when the registry has none.'),
     realtimeUrls: z
       .object({
         tripUpdates: z
@@ -42,7 +42,9 @@ export const feedResource = resource('transitland://feed/{onestop_id}', {
         vehiclePositions: z.string().nullable().describe('GTFS-RT vehicle-positions endpoint.'),
         alerts: z.string().nullable().describe('GTFS-RT service-alerts endpoint.'),
       })
-      .describe('Real-time endpoints when the feed carries GTFS-RT. All null for static feeds.'),
+      .describe(
+        'Real-time endpoints when the feed carries GTFS-RT. All null when the registry lists none.',
+      ),
     license: z
       .object({
         spdxIdentifier: z
@@ -60,8 +62,13 @@ export const feedResource = resource('transitland://feed/{onestop_id}', {
           'Whether derived products are permitted. "unknown" when unspecified.',
         ),
         useWithoutAttribution: triStateField.describe(
-          'Whether attribution can be omitted. "no"/"unknown" implies attribute the source.',
+          'Whether attribution can be omitted. "unknown" means the registry has no recorded term.',
         ),
+        shareAlikeOptional: triStateField.describe('Whether share-alike terms are optional.'),
+        attributionInstructions: z
+          .string()
+          .nullable()
+          .describe('Attribution instructions when published.'),
         attributionText: z
           .string()
           .nullable()
@@ -72,12 +79,15 @@ export const feedResource = resource('transitland://feed/{onestop_id}', {
       ),
     latestFetch: z
       .object({
-        fetchedAt: z.string().nullable().describe('ISO 8601 timestamp of the most recent fetch.'),
+        fetchedAt: z
+          .string()
+          .nullable()
+          .describe('ISO 8601 fetch timestamp recorded on the selected feed version.'),
         earliestServiceDate: z.string().nullable().describe('Earliest covered calendar date.'),
         latestServiceDate: z.string().nullable().describe('Latest covered calendar date.'),
         sha1: z.string().nullable().describe('Content hash of the fetched feed version.'),
       })
-      .describe('Freshness of the current feed version.'),
+      .describe('Recorded fetch timestamp and service coverage of the selected feed version.'),
     authorizationRequired: z
       .boolean()
       .describe('True when fetching the feed itself needs a separate API key/registration.'),

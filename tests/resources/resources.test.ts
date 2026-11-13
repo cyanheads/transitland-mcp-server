@@ -83,6 +83,8 @@ describe('feedResource', () => {
         commercialUseAllowed: 'unknown',
         createDerivedProduct: 'unknown',
         useWithoutAttribution: 'unknown',
+        shareAlikeOptional: 'no',
+        attributionInstructions: 'Include the source credit.',
         attributionText: null,
       },
       latestFetch: {
@@ -98,6 +100,10 @@ describe('feedResource', () => {
     const result = await feedResource.handler(params, ctx);
     expect(result.onestopId).toBe('f-9q9-bart');
     expect(result.license.redistributionAllowed).toBe('unknown');
+    expect(feedResource.output?.parse(result).license).toMatchObject({
+      shareAlikeOptional: 'no',
+      attributionInstructions: 'Include the source credit.',
+    });
     expect(service.getFeed).toHaveBeenCalledWith('f-9q9-bart', ctx, { reason: 'feed_not_found' });
   });
 

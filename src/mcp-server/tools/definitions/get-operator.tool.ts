@@ -1,25 +1,26 @@
 /**
- * @fileoverview transitland_get_operator — fetch the full operator record by Onestop ID
- * or internal integer ID, including agencies, places served, published feeds, and source
+ * @fileoverview transitland_get_operator — fetch the full operator record by Onestop ID,
+ * including agencies, places served, published feeds, and source
  * tags (Wikidata QID, US NTD ID, social handles).
  * @module mcp-server/tools/definitions/get-operator.tool
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { formatUrl, formatValue } from '@/mcp-server/shared/format-value.js';
 import { getTransitlandService } from '@/services/transitland/transitland-service.js';
 
 export const getOperatorTool = tool('transitland_get_operator', {
   title: 'transitland-mcp-server: get operator',
   description:
-    'Fetch the full operator record by Onestop ID or internal integer ID — the agencies it covers, the places served, the feeds it publishes, and source tags (Wikidata QID, US NTD ID, social handles). Use when you already hold an operator ID and want the complete record without a search round-trip.',
+    'Fetch the full operator record by Onestop ID — the agencies it covers, the places served, the feeds it publishes, and source tags (Wikidata QID, US NTD ID, social handles). Use when you already hold an operator ID and want the complete record without a search round-trip.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
   input: z.object({
     operator_key: z
       .string()
       .min(1)
       .describe(
-        'Operator Onestop ID (e.g. "o-9q9-bart") or internal integer ID. Get one from transitland_find_operators or an operator reference in another result.',
+        'Operator Onestop ID (e.g. "o-9q9-bart"). Get one from transitland_find_operators or an operator reference in another result.',
       ),
   }),
   output: z.object({
@@ -57,7 +58,7 @@ export const getOperatorTool = tool('transitland_get_operator', {
             onestopId: z
               .string()
               .describe(
-                'Feed Onestop ID. Pass to transitland_find_feeds or the feed resource for license + fetch URL.',
+                'Feed Onestop ID. Pass to transitland_find_feeds as onestop_id or use the feed resource for license + fetch URL.',
               ),
             spec: z.string().describe('Feed spec: GTFS, GTFS_RT, GBFS, or MDS.'),
             name: z.string().nullable().describe('Feed name. Often null.'),
@@ -84,7 +85,7 @@ export const getOperatorTool = tool('transitland_get_operator', {
       reason: 'operator_not_found',
       code: JsonRpcErrorCode.NotFound,
       thrownBy: 'service',
-      when: 'No operator exists for the given Onestop ID or internal ID.',
+      when: 'No operator exists for the given Onestop ID.',
       recovery:
         'Verify the ID format (e.g. "o-9q9-bart") or search with transitland_find_operators to get a valid Onestop ID.',
     },
@@ -107,11 +108,13 @@ export const getOperatorTool = tool('transitland_get_operator', {
 
   format: (result) => {
     const lines: string[] = [];
-    lines.push(`## ${result.name}${result.shortName ? ` (${result.shortName})` : ''}`);
-    lines.push(`**Onestop ID:** ${result.onestopId}`);
-    lines.push(`**Website:** ${result.website ?? 'Not available'}`);
     lines.push(
-      `**Tags:** Wikidata ${result.tags.wikidataId ?? 'Not available'} · NTD ${result.tags.usNtdId ?? 'Not available'} · Twitter ${result.tags.twitter ?? 'Not available'}`,
+      `**Operator:** ${formatValue(result.name)}${result.shortName === null ? '' : ` (${formatValue(result.shortName)})`}`,
+    );
+    lines.push(`**Onestop ID:** ${formatValue(result.onestopId)}`);
+    lines.push(`**Website:** ${formatUrl(result.website)}`);
+    lines.push(
+      `**Tags:** Wikidata ${formatValue(result.tags.wikidataId)} · NTD ${formatValue(result.tags.usNtdId)} · Twitter ${formatValue(result.tags.twitter)}`,
     );
     if (result.agencies.length > 0) {
       lines.push('', '### Agencies');
@@ -121,14 +124,16 @@ export const getOperatorTool = tool('transitland_get_operator', {
           .filter(Boolean)
           .join(' · ');
         lines.push(
-          `- **${agency.agencyName}** (\`${agency.agencyId}\`)${places ? ` — ${places}` : ''}`,
+          `- ${formatValue(agency.agencyName)} (${formatValue(agency.agencyId)})${places ? ` — ${formatValue(places)}` : ''}`,
         );
       }
     }
     if (result.feeds.length > 0) {
       lines.push('', '### Feeds');
       for (const feed of result.feeds) {
-        lines.push(`- ${feed.onestopId} (${feed.spec})${feed.name ? ` — ${feed.name}` : ''}`);
+        lines.push(
+          `- ${formatValue(feed.onestopId)} (${formatValue(feed.spec)})${feed.name === null ? '' : ` — ${formatValue(feed.name)}`}`,
+        );
       }
     }
     return [{ type: 'text', text: lines.join('\n') }];

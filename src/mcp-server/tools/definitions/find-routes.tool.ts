@@ -7,12 +7,15 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { bboxSchema, normalizeBbox } from '@/mcp-server/shared/bbox-schema.js';
+import { enrichPage } from '@/mcp-server/shared/enrich-page.js';
+import { formatValue } from '@/mcp-server/shared/format-value.js';
 import { getTransitlandService } from '@/services/transitland/transitland-service.js';
 
 export const findRoutesTool = tool('transitland_find_routes', {
   title: 'transitland-mcp-server: find routes',
   description:
-    "Find routes near a point, within a bounding box, by operator, by Onestop ID, or by mode. Returns each route's Onestop ID, short and long name, mode (bus, rail, ferry, subway, tram, …), brand color, and the operating agency's Onestop ID. These are scheduled (GTFS static) route definitions, not live vehicle positions. Geocode place names to coordinates with openstreetmap_geocode before passing lat/lon. Provide at least one of: lat+lon, bbox, operator_onestop_id, onestop_id, or search.",
+    "Find routes near a point, within a bounding box, by operator, by Onestop ID, or by mode. Returns each route's Onestop ID, short and long name, mode (bus, rail, ferry, subway, tram, …), brand color, and the operating agency's Onestop ID. These are scheduled (GTFS static) route definitions, not live vehicle positions. Geocode place names to coordinates with openstreetmap_search_places before passing lat/lon. Provide at least one of: lat+lon, bbox, operator_onestop_id, onestop_id, or search.",
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     lat: z
@@ -21,7 +24,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
       .max(90)
       .optional()
       .describe(
-        'Latitude of the search center (WGS84). Requires lon. Geocode place names with openstreetmap_geocode first — Transitland does not accept place names.',
+        'Latitude of the search center (WGS84). Requires lon. Geocode place names with openstreetmap_search_places first — Transitland does not accept place names.',
       ),
     lon: z
       .number()
@@ -37,12 +40,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
       .describe(
         'Search radius in meters around lat/lon (max 50,000). Routes are matched when they pass within the radius.',
       ),
-    bbox: z
-      .string()
-      .optional()
-      .describe(
-        'Bounding box "minLon,minLat,maxLon,maxLat". Alternative to lat/lon/radius. Cannot be combined with lat/lon.',
-      ),
+    bbox: bboxSchema,
     operator_onestop_id: z
       .string()
       .optional()
@@ -80,7 +78,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
       .number()
       .int()
       .optional()
-      .describe('Pagination cursor from a previous response (enrichment.cursor).'),
+      .describe('Pagination cursor from a previous response (cursor). The next page may be empty.'),
   }),
   output: z.object({
     routes: z
@@ -132,7 +130,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
               .string()
               .nullable()
               .describe(
-                'Onestop ID of the feed this route came from. Pass to transitland_find_feeds for the source data and license.',
+                'Onestop ID of the feed this route came from. Pass to transitland_find_feeds as onestop_id for source data and license.',
               ),
           })
           .describe('A matching route.'),
@@ -144,11 +142,14 @@ export const findRoutesTool = tool('transitland_find_routes', {
     cursor: z
       .number()
       .optional()
-      .describe('Pass as `after` to fetch the next page. Present only when more results exist.'),
+      .describe('Pass as after with the same filters to fetch the next page, which may be empty.'),
     truncated: z.boolean().optional().describe('True when results were capped at the limit.'),
     shown: z.number().optional().describe('Number of routes returned.'),
     cap: z.number().optional().describe('The limit applied.'),
-    notice: z.string().optional().describe('Guidance when nothing matched.'),
+    notice: z
+      .string()
+      .optional()
+      .describe('Page status, continuation guidance, or service notices.'),
   },
   errors: [
     {
@@ -156,7 +157,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
       code: JsonRpcErrorCode.ValidationError,
       when: 'No coordinates, bbox, operator, onestop_id, or search provided (server-enforced guard — the API accepts unfiltered requests but returns a global dump).',
       recovery:
-        'Provide at least one of: lat+lon, bbox, operator_onestop_id, onestop_id, or search. Geocode place names with openstreetmap_geocode first.',
+        'Provide at least one of: lat+lon, bbox, operator_onestop_id, onestop_id, or search. Geocode place names with openstreetmap_search_places first.',
     },
     {
       reason: 'incomplete_point',
@@ -180,9 +181,10 @@ export const findRoutesTool = tool('transitland_find_routes', {
       throw ctx.fail('incomplete_point');
     }
     const hasPoint = input.lat !== undefined && input.lon !== undefined;
+    const bbox = normalizeBbox(input.bbox);
     const hasFilter =
       hasPoint ||
-      !!input.bbox ||
+      !!bbox ||
       !!input.operator_onestop_id ||
       !!input.onestop_id ||
       !!input.search ||
@@ -193,7 +195,7 @@ export const findRoutesTool = tool('transitland_find_routes', {
 
     const params: Record<string, string | number | boolean | undefined> = {
       limit,
-      bbox: input.bbox,
+      bbox,
       operator_onestop_id: input.operator_onestop_id,
       onestop_id: input.onestop_id,
       route_type: input.route_type,
@@ -207,41 +209,35 @@ export const findRoutesTool = tool('transitland_find_routes', {
     }
 
     const page = await getTransitlandService().listRoutes(params, ctx);
-    ctx.enrich.total(page.items.length);
-    if (page.after !== undefined) ctx.enrich({ cursor: page.after });
-    if (page.items.length >= limit) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: limit });
-    }
-    const capNotice =
-      input.limit > limit
-        ? `Requested ${input.limit} results; applied the ${limit}-result page cap. Page further with the after cursor when one is returned. `
-        : '';
-    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
-    if (page.items.length === 0) {
-      ctx.enrich.notice(
-        `${capNotice}No routes matched. If you passed a place name, geocode it to coordinates with openstreetmap_geocode first. Otherwise widen the radius or filter by operator_onestop_id.`,
-      );
-    }
+    enrichPage(ctx, page, {
+      limit,
+      requestedLimit: input.limit,
+      after: input.after,
+      firstPageNotice:
+        'No routes matched. If you passed a place name, geocode it to coordinates with openstreetmap_search_places first. Otherwise widen the radius or filter by operator_onestop_id.',
+    });
     ctx.log.info('find_routes resolved', { count: page.items.length });
     return { routes: page.items };
   },
 
   format: (result) => {
     if (result.routes.length === 0) {
-      return [{ type: 'text', text: 'No routes matched.' }];
+      return [{ type: 'text', text: 'No routes on this page.' }];
     }
     const lines: string[] = [];
     for (const route of result.routes) {
-      const label = route.shortName ?? route.longName ?? route.onestopId;
-      lines.push(`## ${label}${route.shortName && route.longName ? ` — ${route.longName}` : ''}`);
-      lines.push(`**Onestop ID:** ${route.onestopId}`);
-      lines.push(`**Mode:** ${route.mode} (route_type ${route.routeType ?? 'unknown'})`);
-      lines.push(`**Color:** ${route.color ? `#${route.color}` : 'Not available'}`);
+      lines.push(`**Route short name:** ${formatValue(route.shortName)}`);
+      lines.push(`**Route name:** ${formatValue(route.longName)}`);
+      lines.push(`**Onestop ID:** ${formatValue(route.onestopId)}`);
       lines.push(
-        `**Operator:** ${route.operator.name || 'Not available'}${route.operator.onestopId ? ` (${route.operator.onestopId})` : ''}`,
+        `**Mode:** ${formatValue(route.mode)} (route_type ${route.routeType ?? 'unknown'})`,
       );
-      if (route.description) lines.push(route.description);
-      lines.push(`**Feed:** ${route.feedOnestopId ?? 'Not available'}`);
+      lines.push(`**Color:** ${route.color ? `#${formatValue(route.color)}` : 'Not available'}`);
+      lines.push(
+        `**Operator:** ${formatValue(route.operator.name)}${route.operator.onestopId === null ? '' : ` (${formatValue(route.operator.onestopId)})`}`,
+      );
+      lines.push(`**Description:** ${formatValue(route.description)}`);
+      lines.push(`**Feed:** ${formatValue(route.feedOnestopId)}`);
       lines.push('');
     }
     return [{ type: 'text', text: lines.join('\n').trimEnd() }];

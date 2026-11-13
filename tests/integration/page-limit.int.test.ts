@@ -41,6 +41,7 @@ beforeEach(() => {
     result: {
       stop: { onestopId: 's-test', name: 'Test stop', timezone: null },
       departures: [],
+      alerts: [],
       realtimeAvailable: false,
     },
   });
@@ -104,6 +105,8 @@ const stop = {
   onestopId: 's-test',
   name: null,
   code: null,
+  platformCode: null,
+  description: null,
   lat: null,
   lon: null,
   locationType: 0,
@@ -127,6 +130,8 @@ const feed = {
     commercialUseAllowed: 'unknown',
     createDerivedProduct: 'unknown',
     useWithoutAttribution: 'unknown',
+    shareAlikeOptional: 'unknown',
+    attributionInstructions: null,
     attributionText: null,
   },
   latestFetch: { fetchedAt: null, earliestServiceDate: null, latestServiceDate: null, sha1: null },
@@ -138,6 +143,8 @@ const departure = {
   scheduledTime: '2026-10-13T12:00:00Z',
   estimatedTime: null,
   delaySeconds: null,
+  serviceDate: null,
+  platform: { onestopId: 's-test', code: null },
   headsign: null,
   route: { onestopId: 'r-test', shortName: null, longName: null, mode: 'unknown', color: null },
   operatorName: null,
@@ -158,6 +165,7 @@ function seed(
       result: {
         stop: { onestopId: 's-test', name: 'Test stop', timezone: null },
         departures: Array.from({ length: count }, () => departure),
+        alerts: [],
         realtimeAvailable: false,
       },
     });
@@ -210,7 +218,7 @@ describe('bounded page requests', () => {
   it.each(cases.filter((c) => !['operator feeds', 'departures'].includes(c.name)))(
     'preserves the $name cursor across continued and final empty pages',
     async ({ name, called }) => {
-      seed(name, called, 2, 42);
+      seed(name, called, 100, 42);
       const tool =
         name === 'operators'
           ? findOperatorsTool
@@ -220,11 +228,19 @@ describe('bounded page requests', () => {
               ? findRoutesTool
               : findStopsTool;
       const first = await runToolContract(tool, { search: 'test', limit: 101 });
-      expect(first.structuredContent).toMatchObject({ cursor: 42, totalCount: 2 });
+      expect(first.structuredContent).toMatchObject({
+        cursor: 42,
+        totalCount: 100,
+        truncated: true,
+        notice: expect.stringMatching(/Requested 101.*after.*same filters.*may be empty/),
+      });
       seed(name, called, 0);
       const last = await runToolContract(tool, { search: 'test', limit: 101, after: 42 });
       expect(called.mock.calls.at(-1)![0]).toMatchObject({ after: 42, limit: 100 });
-      expect(last.structuredContent).toMatchObject({ totalCount: 0 });
+      expect(last.structuredContent).toMatchObject({
+        totalCount: 0,
+        notice: expect.stringMatching(/Requested 101.*exhausted/),
+      });
       expect(last.structuredContent).not.toHaveProperty('cursor');
       expect(last.structuredContent).not.toHaveProperty('truncated');
       expect(last.content.flatMap((b) => (b.type === 'text' ? [b.text] : [])).join('\n')).toContain(
@@ -232,6 +248,23 @@ describe('bounded page requests', () => {
       );
     },
   );
+  it('keeps the ignored after and cap guidance for a full operator feed page', async () => {
+    seed('operator feeds', service.listFeedsForOperator, 100);
+    const result = await runToolContract(findFeedsTool, {
+      operator_onestop_id: 'o-test',
+      after: 42,
+      limit: 101,
+    });
+    expect(result.structuredContent).toMatchObject({
+      totalCount: 100,
+      truncated: true,
+      notice: expect.stringMatching(/Requested 101.*after.*ignored.*Narrow the filters/),
+    });
+    expect(result.structuredContent).not.toHaveProperty('cursor');
+    expect(result.structuredContent).not.toMatchObject({
+      notice: expect.stringMatching(/raise|exhausted/i),
+    });
+  });
   it.each(cases)('caps $name at 100 and discloses the requested limit', async ({ run, called }) => {
     const result = await run(101);
     expect(result.isError).not.toBe(true);

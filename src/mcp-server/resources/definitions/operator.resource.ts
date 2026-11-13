@@ -15,10 +15,7 @@ export const operatorResource = resource('transitland://operator/{onestop_id}', 
     'Operator record by Onestop ID — agencies, places served, published feeds, and source tags (Wikidata QID, US NTD ID, social handles). Mirrors transitland_get_operator.',
   mimeType: 'application/json',
   params: z.object({
-    onestop_id: z
-      .string()
-      .min(1)
-      .describe('Operator Onestop ID (e.g. "o-9q9-bart") or internal integer ID.'),
+    onestop_id: z.string().min(1).describe('Operator Onestop ID (e.g. "o-9q9-bart").'),
   }),
   output: z.object({
     onestopId: z.string().describe('Stable public Onestop ID.'),
@@ -81,7 +78,7 @@ export const operatorResource = resource('transitland://operator/{onestop_id}', 
       reason: 'operator_not_found',
       code: JsonRpcErrorCode.NotFound,
       thrownBy: 'service',
-      when: 'No operator exists for the given Onestop ID or internal ID.',
+      when: 'No operator exists for the given Onestop ID.',
       recovery:
         'Verify the ID format (e.g. "o-9q9-bart") or search with transitland_find_operators to get a valid Onestop ID.',
     },

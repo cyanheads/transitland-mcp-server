@@ -1,12 +1,14 @@
 /**
- * @fileoverview transitland_find_feeds — discover GTFS, GTFS-Realtime, and GBFS feeds
+ * @fileoverview transitland_find_feeds — discover GTFS, GTFS-Realtime, GBFS, and MDS feeds
  * in the open-data registry. The standout capability: where to legally get a place's
- * transit data, the fetch URL, the license terms, and last-fetch freshness.
+ * transit data, the fetch URL, the license terms, and feed-version metadata.
  * @module mcp-server/tools/definitions/find-feeds.tool
  */
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { enrichPage } from '@/mcp-server/shared/enrich-page.js';
+import { formatUrl, formatValue } from '@/mcp-server/shared/format-value.js';
 import { getTransitlandService } from '@/services/transitland/transitland-service.js';
 
 const triStateField = z.enum(['yes', 'no', 'unknown']);
@@ -14,9 +16,15 @@ const triStateField = z.enum(['yes', 'no', 'unknown']);
 export const findFeedsTool = tool('transitland_find_feeds', {
   title: 'transitland-mcp-server: find feeds',
   description:
-    'Discover GTFS, GTFS-Realtime, and GBFS feeds in the open-data registry. Filter by operator (Onestop ID), feed spec, fetch state, or a search term. Each feed returns its Onestop ID, spec, the fetch URL to download the data, the license terms (redistribution, commercial use, attribution, SPDX identifier where known), and last-fetch freshness (when it was retrieved and the calendar window it covers). Use this to answer "where do I get this agency\'s GTFS, and may I redistribute it?". Pass operator_onestop_id (from transitland_find_operators) to list exactly the feeds an operator publishes — the reliable way to a specific agency\'s feeds; spec also narrows that set. Returns the open-data catalog entry, not departures; for schedules see transitland_get_departures. Provide at least one filter.',
+    "Discover GTFS, GTFS-Realtime, and GBFS feeds in the open-data registry. Filter by exact feed ID, operator, feed spec, fetch state, or a search term. Each feed returns its Onestop ID, spec, the fetch URL to download the data, the license terms (redistribution, commercial use, attribution, SPDX identifier where known), and the selected feed version's recorded fetch timestamp and service dates. Use this to answer \"where do I get this agency's GTFS, and may I redistribute it?\". Pass operator_onestop_id (from transitland_find_operators) to list exactly the feeds an operator publishes — the reliable way to a specific agency's feeds; the other filters narrow that set. Returns the open-data catalog entry, not departures; for schedules see transitland_get_departures. Provide at least one filter.",
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
+    onestop_id: z
+      .string()
+      .optional()
+      .describe(
+        'Exact feed Onestop ID (e.g. "f-9q9-bart") or positive internal feed ID as a string. Combines with the other filters.',
+      ),
     operator_onestop_id: z
       .string()
       .optional()
@@ -59,7 +67,9 @@ export const findFeedsTool = tool('transitland_find_feeds', {
       .number()
       .int()
       .optional()
-      .describe('Pagination cursor from a previous response (enrichment.cursor).'),
+      .describe(
+        'Pagination cursor from a previous response (cursor). The next page may be empty. Ignored when filtering by operator.',
+      ),
   }),
   output: z.object({
     feeds: z
@@ -78,7 +88,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
               .string()
               .nullable()
               .describe(
-                'Direct URL to download the current feed data (the GTFS .zip for static feeds; the realtime endpoint for GTFS-RT/GBFS). Null when the registry has no current URL.',
+                'Download or discovery URL for this feed spec. Null when the registry has no current URL.',
               ),
             realtimeUrls: z
               .object({
@@ -94,9 +104,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
                   .describe('GTFS-RT vehicle-positions endpoint.'),
                 alerts: z.string().nullable().describe('GTFS-RT service-alerts endpoint.'),
               })
-              .describe(
-                'Real-time endpoints when the feed carries GTFS-RT. All null for a static-only GTFS feed.',
-              ),
+              .describe('GTFS-RT endpoints. All null when the registry lists none.'),
             license: z
               .object({
                 spdxIdentifier: z
@@ -116,8 +124,15 @@ export const findFeedsTool = tool('transitland_find_feeds', {
                   'Whether derived products are permitted.',
                 ),
                 useWithoutAttribution: triStateField.describe(
-                  'Whether attribution can be omitted. "no"/"unknown" implies attribute the source.',
+                  'Whether attribution can be omitted. "unknown" means the registry has no recorded term.',
                 ),
+                shareAlikeOptional: triStateField.describe(
+                  'Whether share-alike terms are optional.',
+                ),
+                attributionInstructions: z
+                  .string()
+                  .nullable()
+                  .describe('Attribution instructions when published.'),
                 attributionText: z
                   .string()
                   .nullable()
@@ -131,9 +146,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
                 fetchedAt: z
                   .string()
                   .nullable()
-                  .describe(
-                    'ISO 8601 timestamp of the most recent successful fetch (data freshness).',
-                  ),
+                  .describe('ISO 8601 fetch timestamp recorded on the selected feed version.'),
                 earliestServiceDate: z
                   .string()
                   .nullable()
@@ -147,7 +160,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
                 sha1: z.string().nullable().describe('Content hash of the fetched feed version.'),
               })
               .describe(
-                'Freshness of the current feed version. fetchedAt long in the past or latestServiceDate near today signals stale data.',
+                'Recorded fetch timestamp and service coverage of the selected feed version.',
               ),
             authorizationRequired: z
               .boolean()
@@ -164,17 +177,22 @@ export const findFeedsTool = tool('transitland_find_feeds', {
     cursor: z
       .number()
       .optional()
-      .describe('Pass as `after` to fetch the next page. Present only when more results exist.'),
+      .describe(
+        'Pass as after with the same filters to fetch the next page, which may be empty. Absent for operator-scoped feeds.',
+      ),
     truncated: z.boolean().optional().describe('True when results were capped at the limit.'),
     shown: z.number().optional().describe('Number of feeds returned.'),
     cap: z.number().optional().describe('The limit applied.'),
-    notice: z.string().optional().describe('Guidance when nothing matched.'),
+    notice: z
+      .string()
+      .optional()
+      .describe('Page status, continuation guidance, or service notices.'),
   },
   errors: [
     {
       reason: 'no_filter',
       code: JsonRpcErrorCode.ValidationError,
-      when: 'No operator_onestop_id, spec, search, or fetch_error filter was provided (server-enforced guard — the upstream API accepts unfiltered requests but returns a global firehose).',
+      when: 'No onestop_id, operator_onestop_id, spec, search, or fetch_error filter was provided (server-enforced guard — the upstream API accepts unfiltered requests but returns a global firehose).',
       recovery:
         'Provide at least one filter — operator_onestop_id (from transitland_find_operators) is the most reliable.',
     },
@@ -199,6 +217,7 @@ export const findFeedsTool = tool('transitland_find_feeds', {
   async handler(input, ctx) {
     const limit = Math.min(input.limit, 100);
     const hasFilter =
+      !!input.onestop_id ||
       !!input.operator_onestop_id ||
       !!input.spec ||
       !!input.search ||
@@ -208,17 +227,18 @@ export const findFeedsTool = tool('transitland_find_feeds', {
     }
 
     const service = getTransitlandService();
-    // Transitland's /feeds endpoint has no operator filter, so an operator scope
-    // is satisfied by resolving the operator record's feeds (the search/fetch_error
-    // filters and the cursor don't apply to that resolved set — spec still narrows).
     const page = input.operator_onestop_id
       ? await service.listFeedsForOperator(input.operator_onestop_id, ctx, {
           ...(input.spec && { spec: input.spec }),
+          ...(input.onestop_id && { onestop_id: input.onestop_id }),
+          ...(input.search !== undefined && { search: input.search }),
+          ...(input.fetch_error !== undefined && { fetch_error: input.fetch_error }),
           limit,
           failReason: { reason: 'operator_not_found' },
         })
       : await service.listFeeds(
           {
+            onestop_id: input.onestop_id,
             spec: input.spec,
             search: input.search,
             fetch_error: input.fetch_error,
@@ -227,56 +247,49 @@ export const findFeedsTool = tool('transitland_find_feeds', {
           },
           ctx,
         );
-    ctx.enrich.total(page.items.length);
-    if (page.after !== undefined) ctx.enrich({ cursor: page.after });
-    if (page.items.length >= limit) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: limit });
-    }
-    const capNotice =
-      input.limit > limit
-        ? `Requested ${input.limit} results; applied the ${limit}-result page cap. Narrow the filters or page further with the after cursor when one is returned. `
-        : '';
-    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
-    if (page.items.length === 0) {
-      ctx.enrich.notice(
-        capNotice +
-          (input.operator_onestop_id
-            ? 'This operator publishes no feeds matching that spec. Drop the spec filter, or check the operator record with transitland_get_operator.'
-            : 'No feeds matched. Find the operator with transitland_find_operators, then pass its operator_onestop_id here to list its feeds.'),
-      );
-    }
+    enrichPage(ctx, page, {
+      limit,
+      requestedLimit: input.limit,
+      after: input.after,
+      singlePage: Boolean(input.operator_onestop_id),
+      firstPageNotice: input.operator_onestop_id
+        ? 'This operator publishes no feeds matching these filters. Broaden the filters or check the operator record with transitland_get_operator.'
+        : 'No feeds matched. Check the exact feed ID or broaden the filters. To find an operator’s feeds, get its Onestop ID with transitland_find_operators and pass it as operator_onestop_id.',
+    });
     ctx.log.info('find_feeds resolved', { count: page.items.length });
     return { feeds: page.items };
   },
 
   format: (result) => {
     if (result.feeds.length === 0) {
-      return [{ type: 'text', text: 'No feeds matched.' }];
+      return [{ type: 'text', text: 'No feeds on this page.' }];
     }
     const lines: string[] = [];
     for (const feed of result.feeds) {
-      lines.push(`## ${feed.onestopId} — ${feed.spec}${feed.name ? ` (${feed.name})` : ''}`);
-      lines.push(`**Fetch URL:** ${feed.fetchUrl ?? 'Not available'}`);
+      lines.push(`**Feed:** ${formatValue(feed.onestopId)} — ${formatValue(feed.spec)}`);
+      lines.push(`**Name:** ${formatValue(feed.name)}`);
+      lines.push(`**Fetch URL:** ${formatUrl(feed.fetchUrl)}`);
       lines.push(
         `**Authorization required:** ${feed.authorizationRequired ? 'Yes (separate key/registration)' : 'No'}`,
       );
       const rt = feed.realtimeUrls;
       if (rt.tripUpdates || rt.vehiclePositions || rt.alerts) {
         lines.push(
-          `**Realtime:** trip-updates ${rt.tripUpdates ?? '—'} · vehicles ${rt.vehiclePositions ?? '—'} · alerts ${rt.alerts ?? '—'}`,
+          `**GTFS-RT endpoints:** trip-updates ${formatUrl(rt.tripUpdates)} · vehicles ${formatUrl(rt.vehiclePositions)} · alerts ${formatUrl(rt.alerts)}`,
         );
       } else {
-        lines.push('**Realtime:** none (static feed)');
+        lines.push('**GTFS-RT endpoints:** None');
       }
       const lic = feed.license;
       lines.push(
-        `**License:** SPDX ${lic.spdxIdentifier ?? 'unknown'} · redistribution ${lic.redistributionAllowed} · commercial ${lic.commercialUseAllowed} · derived ${lic.createDerivedProduct} · attribution-optional ${lic.useWithoutAttribution}`,
+        `**License:** SPDX ${formatValue(lic.spdxIdentifier ?? 'unknown')} · redistribution ${lic.redistributionAllowed} · commercial ${lic.commercialUseAllowed} · derived ${lic.createDerivedProduct} · attribution-optional ${lic.useWithoutAttribution} · share-alike-optional ${lic.shareAlikeOptional}`,
       );
-      lines.push(`**License URL:** ${lic.url ?? 'Not available'}`);
-      lines.push(`**Attribution text:** ${lic.attributionText ?? 'Not available'}`);
+      lines.push(`**License URL:** ${formatUrl(lic.url)}`);
+      lines.push(`**Attribution text:** ${formatValue(lic.attributionText)}`);
+      lines.push(`**Attribution instructions:** ${formatValue(lic.attributionInstructions)}`);
       const fetch = feed.latestFetch;
       lines.push(
-        `**Latest fetch:** ${fetch.fetchedAt ?? 'Not available'} · covers ${fetch.earliestServiceDate ?? '?'} → ${fetch.latestServiceDate ?? '?'} · sha1 ${fetch.sha1 ?? 'n/a'}`,
+        `**Feed version fetch timestamp:** ${formatValue(fetch.fetchedAt)} · covers ${formatValue(fetch.earliestServiceDate)} → ${formatValue(fetch.latestServiceDate)} · sha1 ${formatValue(fetch.sha1)}`,
       );
       lines.push('');
     }

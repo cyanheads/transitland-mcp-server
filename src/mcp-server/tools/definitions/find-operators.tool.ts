@@ -7,12 +7,15 @@
 
 import { tool, z } from '@cyanheads/mcp-ts-core';
 import { JsonRpcErrorCode } from '@cyanheads/mcp-ts-core/errors';
+import { bboxSchema, normalizeBbox } from '@/mcp-server/shared/bbox-schema.js';
+import { enrichPage } from '@/mcp-server/shared/enrich-page.js';
+import { formatUrl, formatValue } from '@/mcp-server/shared/format-value.js';
 import { getTransitlandService } from '@/services/transitland/transitland-service.js';
 
 export const findOperatorsTool = tool('transitland_find_operators', {
   title: 'transitland-mcp-server: find operators',
   description:
-    'Find transit operators/agencies by name, near a point or within a bounding box, by country/region, or by Onestop ID. Returns each operator\'s Onestop ID, name, the agencies it covers, the places it serves, and the feeds it publishes. The entry point for "what transit runs here?". Transitland does not geocode place names — geocode a city to coordinates with openstreetmap_geocode first, then pass lat and lon (with an optional radius) or a bbox. Provide at least one of: search, lat+lon, bbox, onestop_id, or a place filter (adm0_name/adm1_name).',
+    'Find transit operators/agencies by name, near a point or within a bounding box, by country/region, or by Onestop ID. Returns each operator\'s Onestop ID, name, the agencies it covers, the places it serves, and the feeds it publishes. The entry point for "what transit runs here?". Transitland does not geocode place names — geocode a city to coordinates with openstreetmap_search_places first, then pass lat and lon (with an optional radius) or a bbox. Provide at least one of: search, lat+lon, bbox, onestop_id, or a place filter (adm0_name/adm1_name).',
   annotations: { readOnlyHint: true, openWorldHint: true },
   input: z.object({
     search: z
@@ -25,7 +28,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       .string()
       .optional()
       .describe(
-        'Operator Onestop ID (e.g. "o-9q9-bart") or internal integer ID, for a direct lookup. When set, other filters are ignored. For the complete record prefer transitland_get_operator.',
+        'Operator Onestop ID (e.g. "o-9q9-bart") for a direct lookup. For the complete record prefer transitland_get_operator.',
       ),
     lat: z
       .number()
@@ -33,7 +36,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       .max(90)
       .optional()
       .describe(
-        'Latitude of the search center (WGS84 decimal degrees). Requires lon. Transitland does not geocode — use openstreetmap_geocode to turn a place name into coordinates first.',
+        'Latitude of the search center (WGS84 decimal degrees). Requires lon. Transitland does not geocode — use openstreetmap_search_places to turn a place name into coordinates first.',
       ),
     lon: z
       .number()
@@ -49,12 +52,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       .describe(
         'Search radius in meters around lat/lon (max 100,000). Operators are matched when their service area intersects the radius.',
       ),
-    bbox: z
-      .string()
-      .optional()
-      .describe(
-        'Bounding box "minLon,minLat,maxLon,maxLat" (e.g. "-122.5,37.7,-122.3,37.9"). Alternative to lat/lon/radius for area surveys. Cannot be combined with lat/lon.',
-      ),
+    bbox: bboxSchema,
     adm0_name: z
       .string()
       .optional()
@@ -79,9 +77,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       .number()
       .int()
       .optional()
-      .describe(
-        'Pagination cursor from a previous response (enrichment.cursor). Returns the next page after this internal ID.',
-      ),
+      .describe('Pagination cursor from a previous response (cursor). The next page may be empty.'),
   }),
   output: z.object({
     operators: z
@@ -122,7 +118,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
                     onestopId: z
                       .string()
                       .describe(
-                        'Feed Onestop ID. Pass to transitland_find_feeds (operator_onestop_id) or look up directly.',
+                        'Feed Onestop ID. Pass to transitland_find_feeds as onestop_id for license and fetch URL.',
                       ),
                     spec: z.string().describe('Feed spec: GTFS, GTFS_RT, GBFS, or MDS.'),
                     name: z.string().nullable().describe('Feed name. Often null.'),
@@ -148,14 +144,14 @@ export const findOperatorsTool = tool('transitland_find_operators', {
     cursor: z
       .number()
       .optional()
-      .describe('Pass as `after` to fetch the next page. Present only when more results exist.'),
+      .describe('Pass as after with the same filters to fetch the next page, which may be empty.'),
     truncated: z.boolean().optional().describe('True when results were capped at the limit.'),
     shown: z.number().optional().describe('Number of operators returned.'),
     cap: z.number().optional().describe('The limit applied.'),
     notice: z
       .string()
       .optional()
-      .describe('Guidance when nothing matched (e.g. geocode-first reminder).'),
+      .describe('Page status, continuation guidance, or service notices.'),
   },
   errors: [
     {
@@ -163,7 +159,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       code: JsonRpcErrorCode.ValidationError,
       when: 'No search, coordinates, bbox, onestop_id, or place filter was provided (server-enforced guard — the API accepts unfiltered requests but returns a paginated global dump).',
       recovery:
-        'Provide at least one of: search, lat+lon, bbox, onestop_id, or adm0_name. For a place, geocode it with openstreetmap_geocode first.',
+        'Provide at least one of: search, lat+lon, bbox, onestop_id, or adm0_name. For a place, geocode it with openstreetmap_search_places first.',
     },
     {
       reason: 'incomplete_point',
@@ -188,11 +184,12 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       throw ctx.fail('incomplete_point');
     }
     const hasPoint = input.lat !== undefined && input.lon !== undefined;
+    const bbox = normalizeBbox(input.bbox);
     const hasFilter =
       !!input.search ||
       !!input.onestop_id ||
       hasPoint ||
-      !!input.bbox ||
+      !!bbox ||
       !!input.adm0_name ||
       !!input.adm1_name;
     if (!hasFilter) {
@@ -205,7 +202,7 @@ export const findOperatorsTool = tool('transitland_find_operators', {
       onestop_id: input.onestop_id,
       adm0_name: input.adm0_name,
       adm1_name: input.adm1_name,
-      bbox: input.bbox,
+      bbox,
       after: input.after,
     };
     if (hasPoint) {
@@ -215,47 +212,42 @@ export const findOperatorsTool = tool('transitland_find_operators', {
     }
 
     const page = await getTransitlandService().listOperators(params, ctx);
-    ctx.enrich.total(page.items.length);
-    if (page.after !== undefined) ctx.enrich({ cursor: page.after });
-    if (page.items.length >= limit) {
-      ctx.enrich.truncated({ shown: page.items.length, cap: limit });
-    }
-    const capNotice =
-      input.limit > limit
-        ? `Requested ${input.limit} results; applied the ${limit}-result page cap. Page further with the after cursor when one is returned. `
-        : '';
-    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
-    if (page.items.length === 0) {
-      ctx.enrich.notice(
-        `${capNotice}No operators matched. If you passed a place name, Transitland needs coordinates — geocode it with openstreetmap_geocode first, then pass lat/lon or bbox. Otherwise broaden the search or radius.`,
-      );
-    }
+    enrichPage(ctx, page, {
+      limit,
+      requestedLimit: input.limit,
+      after: input.after,
+      firstPageNotice: page.notices?.length
+        ? ''
+        : 'No operators matched. If you passed a place name, Transitland needs coordinates — geocode it with openstreetmap_search_places first, then pass lat/lon or bbox. Otherwise broaden the search or radius.',
+    });
     ctx.log.info('find_operators resolved', { count: page.items.length });
     return { operators: page.items };
   },
 
   format: (result) => {
     if (result.operators.length === 0) {
-      return [{ type: 'text', text: 'No operators matched.' }];
+      return [{ type: 'text', text: 'No operators on this page.' }];
     }
     const lines: string[] = [];
     for (const op of result.operators) {
-      lines.push(`## ${op.name}${op.shortName ? ` (${op.shortName})` : ''}`);
-      lines.push(`**Onestop ID:** ${op.onestopId}`);
-      lines.push(`**Website:** ${op.website ?? 'Not available'}`);
-      lines.push(`**Wikidata:** ${op.wikidataId ?? 'Not available'}`);
+      lines.push(
+        `**Operator:** ${formatValue(op.name)}${op.shortName === null ? '' : ` (${formatValue(op.shortName)})`}`,
+      );
+      lines.push(`**Onestop ID:** ${formatValue(op.onestopId)}`);
+      lines.push(`**Website:** ${formatUrl(op.website)}`);
+      lines.push(`**Wikidata:** ${formatValue(op.wikidataId)}`);
       if (op.places.length > 0) {
         const places = op.places
           .map((p) => [p.city, p.region, p.country].filter(Boolean).join(', '))
           .filter(Boolean)
           .join(' · ');
-        lines.push(`**Places:** ${places || 'Not available'}`);
+        lines.push(`**Places:** ${formatValue(places || null)}`);
       } else {
         lines.push('**Places:** Not available');
       }
       if (op.feeds.length > 0) {
         lines.push(
-          `**Feeds:** ${op.feeds.map((f) => `${f.onestopId} (${f.spec})${f.name ? ` "${f.name}"` : ''}`).join(', ')}`,
+          `**Feeds:** ${op.feeds.map((f) => `${formatValue(f.onestopId)} (${formatValue(f.spec)})${f.name === null ? '' : ` "${formatValue(f.name)}"`}`).join(', ')}`,
         );
       } else {
         lines.push('**Feeds:** Not available');

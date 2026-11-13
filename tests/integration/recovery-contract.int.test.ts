@@ -64,6 +64,12 @@ const cases = [
     run: () => runToolContract(getDeparturesTool, { stop_key: 's-missing' }),
     reason: 'stop_not_found',
   },
+  {
+    name: 'departures with a start time and no service date',
+    definition: getDeparturesTool,
+    run: () => runToolContract(getDeparturesTool, { stop_key: 's-test', start_time: '23:00:00' }),
+    reason: 'start_time_requires_service_date',
+  },
 ] as const;
 
 describe('declared recovery parity', () => {

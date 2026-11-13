@@ -152,6 +152,7 @@ describe('TransitlandService.getOperator', () => {
       okJson({
         operators: [
           {
+            onestop_id: 'o-test',
             agencies: [
               {},
               {
@@ -167,7 +168,7 @@ describe('TransitlandService.getOperator', () => {
       }),
     );
     expect(await makeService().getOperator('o-test', createMockContext())).toMatchObject({
-      onestopId: '',
+      onestopId: 'o-test',
       name: '',
       agencies: [
         { agencyId: '', agencyName: '', places: [] },
@@ -180,7 +181,7 @@ describe('TransitlandService.getOperator', () => {
       feeds: [],
       tags: { wikidataId: 'Q1', usNtdId: '123', twitter: 'handle' },
     });
-    fetchMock.mockResolvedValueOnce(okJson({ operators: [{}] }));
+    fetchMock.mockResolvedValueOnce(okJson({ operators: [{ onestop_id: 'o-sparse' }] }));
     expect(await makeService().getOperator('o-sparse', createMockContext())).toMatchObject({
       agencies: [],
       tags: { wikidataId: null, usNtdId: null, twitter: null },

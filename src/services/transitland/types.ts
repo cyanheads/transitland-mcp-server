@@ -62,6 +62,7 @@ export interface RawOperator {
 }
 
 export interface RawLicense {
+  attribution_instructions?: string | null;
   attribution_text?: string | null;
   commercial_use_allowed?: string | null;
   create_derived_product?: string | null;
@@ -74,6 +75,7 @@ export interface RawLicense {
 
 export interface RawFeedUrls {
   gbfs_auto_discovery?: string | null;
+  mds_provider?: string | null;
   realtime_alerts?: string | null;
   realtime_trip_updates?: string | null;
   realtime_vehicle_positions?: string | null;
@@ -146,7 +148,7 @@ export interface RawStop {
   id?: number;
   location_type?: number | null;
   onestop_id?: string | null;
-  parent?: { onestop_id?: string | null } | string | null;
+  parent?: { id?: number | null; onestop_id?: string | null } | string | null;
   place?: RawPlace | null;
   platform_code?: string | null;
   stop_code?: string | null;
@@ -181,6 +183,7 @@ export interface RawDepartureRoute {
 }
 
 export interface RawDepartureTrip {
+  alerts?: RawAlert[] | null;
   bikes_allowed?: number | null;
   direction_id?: number | null;
   route?: RawDepartureRoute | null;
@@ -200,10 +203,27 @@ export interface RawDeparture {
 }
 
 export interface RawStopWithDepartures {
+  alerts?: RawAlert[] | null;
+  children?: RawStopWithDepartures[] | null;
   departures?: RawDeparture[] | null;
   onestop_id?: string | null;
+  platform_code?: string | null;
   stop_name?: string | null;
   stop_timezone?: string | null;
+}
+
+type RawTranslation = { text?: string | null };
+
+export interface RawAlert {
+  active_period?: { start?: number | null; end?: number | null }[] | null;
+  cause?: string | null;
+  description_text?: RawTranslation[] | null;
+  effect?: string | null;
+  entity_id?: string | null;
+  header_text?: RawTranslation[] | null;
+  rt_feed_onestop_id?: string | null;
+  severity_level?: string | null;
+  url?: RawTranslation[] | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -215,6 +235,7 @@ export interface RawStopWithDepartures {
 export interface Page<T> {
   after?: number;
   items: T[];
+  notices?: string[];
 }
 
 export interface PlaceSummary {
@@ -275,7 +296,9 @@ export interface FeedRecord {
     commercialUseAllowed: TriState;
     createDerivedProduct: TriState;
     useWithoutAttribution: TriState;
+    shareAlikeOptional: TriState;
     attributionText: string | null;
+    attributionInstructions: string | null;
   };
   name: string | null;
   onestopId: string;
@@ -304,6 +327,7 @@ export interface RouteRecord {
 
 export interface StopRecord {
   code: string | null;
+  description: string | null;
   feedOnestopId: string | null;
   lat: number | null;
   locationType: number;
@@ -316,16 +340,29 @@ export interface StopRecord {
     country: string | null;
     region: string | null;
   };
+  platformCode: string | null;
   timezone: string | null;
   wheelchairBoarding: WheelchairState;
 }
 
+export interface AlertRecord {
+  activePeriods: { start: string | null; end: string | null }[];
+  cause: string | null;
+  description: string | null;
+  effect: string | null;
+  header: string | null;
+  severity: string | null;
+  url: string | null;
+}
+
 export interface DepartureRecord {
+  alerts?: AlertRecord[];
   delaySeconds: number | null;
   directionId: number | null;
   estimatedTime: string | null;
   headsign: string | null;
   operatorName: string | null;
+  platform: { onestopId: string | null; code: string | null };
   realtime: boolean;
   route: {
     onestopId: string;
@@ -336,11 +373,13 @@ export interface DepartureRecord {
   };
   scheduledTime: string;
   scheduleRelationship: string;
+  serviceDate: string | null;
   tripId: string | null;
   wheelchairAccessible: WheelchairState;
 }
 
 export interface DeparturesResult {
+  alerts: AlertRecord[];
   departures: DepartureRecord[];
   realtimeAvailable: boolean;
   stop: {
@@ -348,4 +387,13 @@ export interface DeparturesResult {
     name: string | null;
     timezone: string | null;
   };
+}
+
+export interface OperatorFeedOptions {
+  failReason?: { reason: string };
+  fetch_error?: boolean;
+  limit: number;
+  onestop_id?: string;
+  search?: string;
+  spec?: string;
 }
