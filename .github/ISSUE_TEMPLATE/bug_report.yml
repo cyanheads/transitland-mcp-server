@@ -112,6 +112,6 @@ body:
     id: context
     attributes:
       label: Additional context
-      description: Workarounds, related issues, logs, or anything else relevant.
+      description: Only what changes the fix — a workaround, a related issue, the one log line that matters.
     validations:
       required: false
