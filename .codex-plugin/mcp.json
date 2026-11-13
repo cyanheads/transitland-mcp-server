@@ -4,8 +4,7 @@
     "args": ["-y", "@cyanheads/transitland-mcp-server"],
     "env_vars": ["TRANSITLAND_API_KEY"],
     "env": {
-      "MCP_TRANSPORT_TYPE": "stdio",
-      "TRANSITLAND_API_KEY": "${TRANSITLAND_API_KEY}"
+      "MCP_TRANSPORT_TYPE": "stdio"
     }
   }
 }

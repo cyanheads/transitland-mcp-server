@@ -1,0 +1,32 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "transitland-mcp-server",
+  "version": "0.2.0",
+  "description": "Global transit data from the Transitland v2 registry — operators, GTFS/GTFS-RT/GBFS feeds with license terms, routes, stops, and real-time-aware departures via MCP. STDIO or Streamable HTTP.",
+  "author": {
+    "name": "Casey Hand",
+    "email": "casey@caseyjhand.com",
+    "url": "https://caseyjhand.com"
+  },
+  "homepage": "https://github.com/cyanheads/transitland-mcp-server#readme",
+  "repository": "https://github.com/cyanheads/transitland-mcp-server",
+  "license": "Apache-2.0",
+  "keywords": [
+    "transit",
+    "transitland",
+    "gtfs",
+    "gtfs-realtime",
+    "gbfs",
+    "public-transit",
+    "departures",
+    "transit-feeds",
+    "mcp",
+    "mcp-server",
+    "model-context-protocol",
+    "typescript",
+    "bun",
+    "stdio",
+    "streamable-http",
+    "ai-agent"
+  ]
+}

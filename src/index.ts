@@ -19,13 +19,9 @@ export const app = await createApp({
   title: 'transitland-mcp-server',
   tools: allToolDefinitions,
   resources: allResourceDefinitions,
+  skills: 'skills',
   instructions:
-    'Wraps the global Transitland v2 registry (GTFS, GTFS-Realtime, GBFS feeds worldwide). ' +
-    'Onestop IDs (o-/f-/r-/s-) are the identifier spine — surfaced in every result, accepted on input. ' +
-    'Transitland does not geocode: turn place names into coordinates with openstreetmap_geocode first, then pass lat/lon or bbox. ' +
-    'find_feeds is the standout — fetch URLs, license terms, and freshness for open transit data. ' +
-    'get_departures distinguishes live GTFS-Realtime predictions (realtime=true) from static schedule (realtime=false) per departure. ' +
-    'For deep live tracking in a configured region, prefer onebusaway-mcp-server.',
+    'Use openstreetmap_search_places to geocode place names before passing lat/lon or bbox. Use Onestop IDs to connect operators, feeds, routes, and stops. transitland_find_feeds returns data URLs and license terms. transitland_get_departures returns stop or station departures and service alerts, with realtime=true for live predictions.',
   // Session posture declared in code rather than left to a deployment's
   // MCP_SESSION_MODE (which still wins when it carries a meaningful value).
   // Every tool is a per-call read against the registry and none calls
