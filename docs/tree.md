@@ -1,6 +1,6 @@
 # transitland-mcp-server - Directory Structure
 
-Generated on: 2026-10-13 12:44:29
+Generated on: 2026-11-13 16:14:59
 
 ```text
 transitland-mcp-server/
@@ -37,6 +37,8 @@ transitland-mcp-server/
 │   ├── add-resource/
 │   │   └── SKILL.md
 │   ├── add-service/
+│   │   └── SKILL.md
+│   ├── add-skill/
 │   │   └── SKILL.md
 │   ├── add-test/
 │   │   └── SKILL.md
@@ -134,6 +136,9 @@ transitland-mcp-server/
 │   ├── prune-musl-packages.ts
 │   ├── release-github.ts
 │   └── tree.ts
+├── skills/
+│   └── transitland-guide/
+│       └── SKILL.md
 ├── src/
 │   ├── config/
 │   │   └── server-config.ts
@@ -143,6 +148,10 @@ transitland-mcp-server/
 │   │   │       ├── feed.resource.ts
 │   │   │       ├── index.ts
 │   │   │       └── operator.resource.ts
+│   │   ├── shared/
+│   │   │   ├── bbox-schema.ts
+│   │   │   ├── enrich-page.ts
+│   │   │   └── format-value.ts
 │   │   └── tools/
 │   │       └── definitions/
 │   │           ├── find-feeds.tool.ts
@@ -154,6 +163,8 @@ transitland-mcp-server/
 │   │           └── index.ts
 │   ├── services/
 │   │   └── transitland/
+│   │       ├── assemble-departures.ts
+│   │       ├── gtfs-values.ts
 │   │       ├── transitland-service.ts
 │   │       └── types.ts
 │   └── index.ts
@@ -169,6 +180,7 @@ transitland-mcp-server/
 │   ├── resources/
 │   │   └── resources.test.ts
 │   ├── services/
+│   │   ├── transitland-regressions.test.ts
 │   │   └── transitland-service.test.ts
 │   ├── smoke/
 │   │   └── definitions.smoke.test.ts
@@ -190,7 +202,9 @@ transitland-mcp-server/
 ├── Dockerfile
 ├── LICENSE
 ├── manifest.json
+├── mcp.json
 ├── package.json
+├── plugin.json
 ├── README.md
 ├── server.json
 ├── tsconfig.build.json

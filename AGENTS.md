@@ -2,10 +2,10 @@
 
 **Server:** transitland-mcp-server
 **Version:** 0.2.0
-**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.15`
-**Engines:** Bun ≥1.4.0, Node ≥24.0.0
-**MCP SDK:** `@modelcontextprotocol/server` ^2.3.1
-**Zod:** ^4.6.5
+**Framework:** [@cyanheads/mcp-ts-core](https://www.npmjs.com/package/@cyanheads/mcp-ts-core) `^0.13.22`
+**Engines:** Bun ≥1.4.4, Node ≥24.0.0
+**MCP SDK:** `@modelcontextprotocol/server` ^2.4.0
+**Zod:** ^4.6.7
 
 > **Read the framework docs first:** `node_modules/@cyanheads/mcp-ts-core/CLAUDE.md` contains the full API reference — builders, Context, error codes, exports, patterns. This file covers server-specific conventions only.
 
@@ -13,10 +13,10 @@
 
 ## Overview
 
-Wraps the [Transitland v2 REST API](https://www.transit.land/documentation) — the open registry aggregating GTFS, GTFS-Realtime, and GBFS feeds from thousands of transit operators worldwide. Six tools and two resources over a single upstream: operators → feeds → routes → stops → departures.
+Wraps the [Transitland v2 REST API](https://www.transit.land/documentation) — the open registry aggregating GTFS, GTFS-Realtime, and GBFS feeds from thousands of transit operators worldwide. Six tools and two data resources over a single upstream: operators → feeds → routes → stops → departures. The published `transitland-guide` skill is also served as an MCP resource.
 
-- **Onestop IDs are the identifier spine.** Every output surfaces the stable, public Onestop ID (`o-`/`f-`/`r-`/`s-`); every ID input also accepts an internal integer ID. Internal integers are instance-mutable and never the primary output identifier.
-- **No geocoding.** Transitland takes `lat`+`lon`+`radius` or a `bbox`, never a place name. Geography-capable tools name a geocoding pre-step (`openstreetmap_geocode`) in their descriptions and empty-result notices.
+- **Onestop IDs are the public identifiers.** Operator lookups require an operator Onestop ID. Feed, route, and stop exact filters and the feed resource and departure lookup also accept internal IDs as strings. Internal IDs are deployment-specific.
+- **Geocoding is external.** Geography filters accept `lat`+`lon`+`radius` and `bbox`. Tool descriptions and empty first-page notices name `openstreetmap_search_places` for resolving place names.
 - **`find_feeds` is the standout** — fetch URL + license terms + freshness for open transit data. License fields normalize to explicit `yes`/`no`/`unknown` and are never inferred from a blank registry field.
 - **Real-time is structural.** `get_departures` sets a per-departure `realtime` boolean and `scheduleRelationship`, plus a top-level `realtimeAvailable`, so a static timetable time is never mistaken for a live GTFS-RT prediction.
 - **The `meta.next` pagination URL embeds the API key in plaintext** — the service discards it and returns only the opaque integer `after` cursor, so the key never reaches tool output or logs.
@@ -51,13 +51,13 @@ import { getTransitlandService } from '@/services/transitland/transitland-servic
 export const getOperatorTool = tool('transitland_get_operator', {
   title: 'transitland-mcp-server: get operator',
   description:
-    'Fetch the full operator record by Onestop ID or internal integer ID — agencies, places served, published feeds, and source tags (Wikidata QID, US NTD ID, social handles).',
+    'Fetch the full operator record by Onestop ID, including agencies, places served, published feeds, and source tags.',
   annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
   input: z.object({
     operator_key: z
       .string()
       .min(1)
-      .describe('Operator Onestop ID (e.g. "o-9q9-bart") or internal integer ID.'),
+      .describe('Operator Onestop ID (e.g. "o-9q9-bart"). Find it with transitland_find_operators.'),
   }),
   output: z.object({
     onestopId: z.string().describe('Stable public Onestop ID.'),
@@ -89,7 +89,7 @@ export const getOperatorTool = tool('transitland_get_operator', {
 });
 ```
 
-List tools (`find_operators`, `find_feeds`, `find_routes`, `find_stops`) follow the same shape with an `enrichment` block: `ctx.enrich.total(n)` for the always-present count, `ctx.enrich({ cursor })` for the `after` pager, `ctx.enrich.truncated({ shown, cap })` when capped, and `ctx.enrich.notice(...)` for an empty-result recovery hint (truncation fields stay `.optional()` — the framework only populates them when the cap is hit).
+List tools (`find_operators`, `find_feeds`, `find_routes`, `find_stops`) use `ctx.enrich.total(n)` for page count, `ctx.enrich({ cursor })` for continuation, and `ctx.enrich.truncated({ shown, cap })` when capped. Compose pagination guidance, empty-page status, and service notices in one `ctx.enrich.notice(...)` call. Operator-scoped feeds return a single page and report any ignored cursor.
 
 ### Resource
 
@@ -300,7 +300,9 @@ No prompts directory — this server defines none.
 
 ## Skills
 
-Skills are modular instructions in `framework-skills/` at the project root. Read them directly when a task matches — e.g., `framework-skills/add-tool/SKILL.md` when adding a tool. `bun run list-skills` prints the full registry. The directory is deliberately not `skills/`: Claude Code and Codex auto-load a plugin's root `skills/`, so a server that ships `.claude-plugin/` or `.codex-plugin/` would hand these development skills to every agent that installs it. Keep `skills/` free for skills meant for those agents.
+Development skills live in `framework-skills/`. Read the matching skill directly, such as `framework-skills/add-tool/SKILL.md` when adding a tool. `bun run list-skills` prints the registry.
+
+Published skills live in root `skills/`. Plugin installs and the `.mcpb` bundle load these skills from that directory. The npm package and Docker image ship the tree when the server opts in, and `createApp({ skills: 'skills' })` serves it to MCP clients. Use `add-skill` to author a skill and `lint:packaging` to verify the tree.
 
 **Agent skill directory:** Copy skills into the directory your agent discovers (Claude Code: `.claude/skills/`, others: equivalent). Skills then load as context without referencing `framework-skills/` paths. After framework updates, run the `maintenance` skill — Phase B re-syncs the agent directory.
 
@@ -316,6 +318,7 @@ Available skills:
 | `add-prompt` | Scaffold a new prompt definition |
 | `add-service` | Scaffold a new service integration |
 | `add-test` | Scaffold test file for a tool, resource, or service |
+| `add-skill` | Author and validate a published skill that teaches agents how to use this server |
 | `field-test` | Exercise tools/resources/prompts with real inputs, verify behavior, report issues |
 | `tool-defs-analysis` | Read-only audit of MCP definition language across the surface — voice, leaks, defaults, recovery hints, output descriptions |
 | `security-pass` | Audit server for MCP-flavored security gaps: output injection, scope blast radius, input sinks, tenant isolation |
@@ -361,7 +364,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 | `bun run audit:fix` | `bun audit fix` — upgrade vulnerable packages to the lowest safe version within existing ranges (`--dry-run` previews, `--latest` rewrites ranges). First response when `devcheck` flags a transitive advisory; then `bun update <name>`, then `bun dedupe` |
 | `bun run audit:refresh` | Delete `bun.lock` and reinstall. Last resort after `audit:fix`, `bun update <name>`, and `bun dedupe` — re-resolves every ranged dep (the framework pin included) and rewrites the lockfile as `lockfileVersion: 2` |
 | `bun run lint:mcp` | Run the MCP definition linter standalone (rule catalog: `api-linter` skill) |
-| `bun run lint:packaging` | Packaging surface checks — `server.json`/`manifest.json` env-var parity (run by devcheck) |
+| `bun run lint:packaging` | Check environment-variable parity, bundle exclusions, plugin manifests, and published skills (run by devcheck) |
 | `bun run list-skills` | List the project skills and their paths |
 | `bun run tree` | Generate directory structure doc |
 | `bun run format` | Auto-fix formatting (safe fixes only) |
@@ -381,7 +384,7 @@ When you complete a skill's checklist, check the boxes and add a completion time
 
 ## Bundling
 
-`npm run bundle` produces a `.mcpb` extension bundle for one-click install in Claude Desktop. The pack step is followed by `scripts/clean-mcpb.ts`, which prunes dev dependencies (`mcpb clean`) and strips two classes of `node_modules/**` content that root-anchored `.mcpbignore` patterns cannot reach: dependency-shipped agent docs (`framework-skills/`, `skills/`, `.claude/`, `.agents/`, `SKILL.md`) and platform-specific native bindings, which would otherwise lock the bundle to the platform it was packed on. MCPB is stdio-only — HTTP and Cloudflare Workers deployments are unaffected. Consumers who don't need it can delete `manifest.json` and `.mcpbignore`; `lint:packaging` skips cleanly.
+`npm run bundle` produces a stdio `.mcpb` extension for Claude Desktop. Keep development paths in `.mcpbignore` using root-anchored patterns such as `/docs/`. A published root `skills/` tree belongs in the bundle. `scripts/clean-mcpb.ts` prunes dev dependencies, dependency-root agent docs, platform-specific bindings, node-gyp intermediates, and build-only files. It preserves runtime modules in nested dependency `skills/` directories. `lint:packaging` checks both the exclusions and any built bundle.
 
 **Adding an env var requires both files:** `server.json` (registry discovery, `environmentVariables[]`) and `manifest.json` (bundle install UX, `mcp_config.env` + `user_config`). `lint:packaging` (run by `devcheck`) verifies the env var names match, that every `user_config` option is wired into `mcp_config.env` as `"X": "${user_config.X}"` (the host substitutes nothing else — `"${X}"` reaches the server as that literal string), and that an optional string option carries `"default": ""`.
 
@@ -451,4 +454,7 @@ import { getTransitlandService } from '@/services/transitland/transitland-servic
 - [ ] `.codex-plugin/plugin.json` populated — `name`, `version`, `description`, `repository`, `license` from `package.json`; `interface.displayName` = the unscoped repo name (never the npm scope — `lint:packaging` enforces this); `interface.shortDescription` from `package.json` description
 - [ ] `.codex-plugin/mcp.json` updated — server name key is the unscoped repo name; every user-supplied variable (API key, contact email, instance URL) is listed in `env_vars` so Codex forwards it from the user's environment. Never write `"KEY": ""` into `env` — an empty value replaces the user's exported key and is read as unset
 - [ ] `.claude-plugin/plugin.json` populated — `name`, `version`, `description`, `author`, `repository`, `license`, `keywords` from `package.json`; inline `mcpServers` entry keyed by the unscoped repo name. Every user-supplied variable is declared under `userConfig` (`type`, `title`, `description`; `sensitive: true` for keys and tokens; `required: true` or `default: ""`) and referenced from `env` as `"KEY": "${user_config.<option>}"` — mirror the `user_config` block in `manifest.json`. Never write `"KEY": ""` into `env`
+- [ ] Root `plugin.json` carries Agent Plugins 1.0 metadata from `package.json`. Root `mcp.json` declares one stdio server keyed by the unscoped name, running `npx -y @cyanheads/transitland-mcp-server` with fixed environment values. Keep the Codex manifest's `mcpServers` pointer so Codex forwards `TRANSITLAND_API_KEY` from the overlay's `env_vars`.
+- [ ] Development paths have root-anchored `.mcpbignore` entries. `bun run bundle` and `bun run lint:packaging` pass.
+- [ ] If root `skills/` is present, field-test its gates and identifier claims against the tools.
 - [ ] `npm run devcheck` passes

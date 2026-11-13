@@ -6,19 +6,19 @@
 
 | Name | Description | Key Inputs | Annotations |
 |:-----|:------------|:-----------|:------------|
-| `transitland_find_operators` | Find transit operators/agencies by name, near a point or bounding box, by place, or by Onestop ID. Returns Onestop ID, name, the agencies covered, the places served, and the feeds each publishes. The entry point — resolve a place or name to operators. Transitland does not geocode place names; geocode a city to coordinates with `openstreetmap_geocode` first, then pass `lat`/`lon` (or a `bbox`). | `search?`, `lat?`+`lon?`+`radius?`, `bbox?`, `onestop_id?`, `adm0_name?`, `adm1_name?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
-| `transitland_get_operator` | Fetch the full operator record by Onestop ID (or internal integer ID): the agencies it covers, the places served, the feeds it publishes, and source tags (Wikidata QID, US NTD ID, social handles). Use when you already hold an operator ID and want the complete record without a search round-trip. | `operator_key` | `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: true` |
-| `transitland_find_feeds` | Discover GTFS, GTFS-Realtime, and GBFS feeds — the open-data catalog. Filter by operator (Onestop ID), feed spec, fetch state, or a search term. Each feed returns its Onestop ID, spec, the fetch URL to download the data, the license terms (redistribution, commercial use, attribution, SPDX where known), and last-fetch freshness. The unique value of this server: where to legally get a place's transit data and on what terms. Discover feeds by operator (reliable) rather than by radius (coarse — feed geometry spans the whole feed). | `operator_onestop_id?`, `spec?`, `search?`, `fetch_error?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
-| `transitland_find_routes` | Find routes near a point, within a bounding box, by operator, or by Onestop ID. Returns route Onestop ID, short and long name, mode (bus, rail, ferry, subway, tram, …), brand color, and the operating agency. Geocode place names to coordinates with `openstreetmap_geocode` before passing `lat`/`lon`. | `lat?`+`lon?`+`radius?`, `bbox?`, `operator_onestop_id?`, `onestop_id?`, `route_type?`, `search?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
+| `transitland_find_operators` | Find operators by name, geography, place, or Onestop ID. Returns agencies, places served, and published feeds. Use `openstreetmap_search_places` to geocode places for geographic queries. | `search?`, `lat?`+`lon?`+`radius?`, `bbox?`, `onestop_id?`, `adm0_name?`, `adm1_name?`, `limit?`, `after?` | `readOnlyHint: true`, `openWorldHint: true` |
+| `transitland_get_operator` | Fetch an operator by Onestop ID, including agencies, places served, feeds, and source tags. | `operator_key` | `readOnlyHint: true`, `idempotentHint: true`, `openWorldHint: true` |
+| `transitland_find_feeds` | Find GTFS, GTFS-Realtime, GBFS, and MDS feed metadata, URLs, and license terms by exact feed ID or by operator, spec, fetch state, or search. | `onestop_id?`, `operator_onestop_id?`, `spec?`, `search?`, `fetch_error?`, `limit?`, `after?` | `readOnlyHint: true`, `openWorldHint: true` |
+| `transitland_find_routes` | Find routes near a point, within a bounding box, by operator, or by Onestop ID. Returns route Onestop ID, short and long name, mode (bus, rail, ferry, subway, tram, …), brand color, and the operating agency. Geocode place names to coordinates with `openstreetmap_search_places` before passing `lat`/`lon`. | `lat?`+`lon?`+`radius?`, `bbox?`, `operator_onestop_id?`, `onestop_id?`, `route_type?`, `search?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
 | `transitland_find_stops` | Find stops/stations by name search, point/radius, bbox, ID, or operator network. Geocode place names for geographic queries; stop-name search needs no geocoding. Returns nullable coordinates and stop metadata; pass a stop ID to departures. | `lat?`+`lon?`+`radius?`, `bbox?`, `onestop_id?`, `served_by_onestop_ids?`, `search?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
-| `transitland_get_departures` | Departures from a stop by Onestop ID (or internal ID). Returns each departure's route, headsign, trip, and scheduled time — plus the real-time predicted time and delay **only where the feed publishes GTFS-Realtime**. The `realtime` flag and `schedule_relationship` on every departure tell you whether a time is a live prediction or a static timetable entry, so a schedule is never mistaken for a live arrival. Resolve a stop to its Onestop ID with `transitland_find_stops` first. | `stop_key`, `next_seconds?`, `service_date?`, `use_service_window?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
+| `transitland_get_departures` | Get stop or station departures with boarding locations, service dates, predictions when available, and stop and trip alerts. | `stop_key`, `next_seconds?`, `service_date?`, `start_time?`, `use_service_window?`, `limit?` | `readOnlyHint: true`, `openWorldHint: true` |
 
 ### Resources
 
 | URI Template | Description | Pagination |
 |:-------------|:------------|:-----------|
 | `transitland://operator/{onestop_id}` | Operator record by Onestop ID — agencies, places served, published feeds, source tags. Mirrors `transitland_get_operator`. | No |
-| `transitland://feed/{onestop_id}` | Feed record by Onestop ID — spec, fetch URL, license, latest fetch freshness. The catalog entry for one feed. | No |
+| `transitland://feed/{onestop_id}` | Feed record by Onestop ID — spec, fetch URL, license, and selected feed-version metadata. The catalog entry for one feed. | No |
 
 Both resources are convenience surfaces for clients that support injectable context. Every datum they expose is also reachable through the tool surface (`transitland_get_operator`, `transitland_find_feeds`), so tool-only clients lose nothing. Stops and routes get no resource — they're discovered in bulk by geography, not referenced by a single stable URI an agent would inject.
 
@@ -51,8 +51,8 @@ Global coverage. Read-only.
 
 - Read-only access to the Transitland registry: operators, feeds, routes, stops, departures.
 - **API key required**, passed as the `apikey` **query parameter** (Transitland also accepts an `apikey` header) — **not** an `Authorization: Bearer` header. Config env var: `TRANSITLAND_API_KEY`.
-- **Onestop IDs are the surfaced currency.** Accept both Onestop IDs (`o-9q9-bart`, `f-9q9-bart`, `r-9q9p-800`, `s-9q8yyw3xjw-powell`) and internal integer IDs on input; always surface the Onestop ID in output (public, durable, legible across deployments). Internal integer IDs are instance-mutable and never the primary output identifier.
-- **Geographic-first, but no geocoding.** Transitland takes `lat`+`lon`+`radius` or a `bbox` — never a place name. Every geography-capable tool documents the `openstreetmap_geocode` pre-step so an agent doesn't pass "Seattle" and get nothing.
+- **Onestop IDs are the public identifiers.** Operator lookups use Onestop IDs (`o-9q9-bart`). Feed, route, and stop exact list filters, the feed resource, and departure lookups also accept internal IDs as strings. Internal IDs are deployment-specific.
+- **Geographic-first, but no geocoding.** Transitland takes `lat`+`lon`+`radius` or a `bbox` — never a place name. Every geography-capable tool documents the `openstreetmap_search_places` pre-step so an agent doesn't pass "Seattle" and get nothing.
 - **Feed registry is the differentiator.** `find_feeds` surfaces fetch URL + license terms + fetch freshness for open feeds — uniquely Transitland.
 - **Real-time is conditional.** Departures are scheduled unless the feed carries GTFS-RT. Surface `realtime` (boolean) and `schedule_relationship` per departure, and both the scheduled and (when present) estimated times, so a static timetable is never presented as a live prediction.
 - **Rate-limited free tier.** The free key is rate-limited (Pro tier raises quotas). The service surfaces 429 as a retryable `rate_limited` error with a back-off hint.
@@ -70,8 +70,8 @@ Global coverage. Read-only.
 Single service, single upstream. A thin HTTP client (native `fetch` via the framework's `fetchWithTimeout` + `withRetry`) that:
 
 - Injects `apikey` as a query parameter on every request from `TRANSITLAND_API_KEY`.
-- Exposes one typed method per endpoint: `listOperators`, `getOperator`, `listFeeds`, `getFeed`, `listRoutes`, `listStops`, `getDepartures`.
-- Normalizes the cursor: reads `meta.after`, **discards `meta.next`** (it leaks the key), returns `{ items, after }`.
+- Exposes typed methods for each lookup: `listOperators`, `getOperator`, `listFeeds`, `listFeedsForOperator`, `getFeed`, `listRoutes`, `listStops`, and `getDepartures`.
+- Normalizes the cursor: reads `meta.after`, **discards `meta.next`** (it leaks the key), returns `{ items, after?, notices? }`.
 - Classifies upstream failures: 401 → `Unauthorized` (bad key), 404 → `NotFound`, 429 → retryable `RateLimited` (-32003) with `reason: rate_limited` and the declared recovery hint; 5xx/timeouts retain the framework classification.
 - Holds no shared state beyond config — no caching primitive needed for v1 (the registry is read-mostly and per-call; add session caching later only if rate limits bite).
 
@@ -90,7 +90,7 @@ No SDK: Transitland publishes no maintained TypeScript client, and the REST surf
 
 | Concern | Decision |
 |:--------|:---------|
-| Over-fetch on feeds | The feeds endpoint returns the **entire `feed_versions` history** by default (BART: 167 versions). The service requests `feed_versions.limit=1` (or slices to the latest) so a feed lookup returns current freshness, not a multi-year fetch log. |
+| Feed versions | The API may return the full `feed_versions` history despite the request hint. Tool and resource output select the first returned version and expose its recorded metadata. |
 | `meta.next` leak | Never surfaced; only the integer `after` cursor is returned for pagination. |
 | Field bloat | Operator/agency `geometry` polygons and route/stop geometry are large coordinate arrays with no agent decision value — omitted from tool output by default (a coarse place summary is surfaced instead). |
 
@@ -128,12 +128,12 @@ Each step is independently testable. Tests include at least one **sparse payload
 | Noun | Operations | API Endpoint(s) |
 |:-----|:-----------|:----------------|
 | Operator | find (search / radius / bbox / place / onestop), get | `GET /operators`, `GET /operators/{onestop_id}` |
-| Feed | find (operator / spec / search / fetch-state), get | `GET /feeds`, `GET /feeds/{onestop_id}` |
+| Feed | find (exact ID / operator / spec / search / fetch-state), get | `GET /feeds`, `GET /feeds/{onestop_id}` |
 | Route | find (radius / bbox / operator / onestop / mode / search) | `GET /routes` |
 | Stop | find (radius / bbox / onestop / served-by / search) | `GET /stops` |
 | Departure | get (for a stop) | `GET /stops/{stop_key}/departures` |
 
-`get` for routes and stops is intentionally folded into `find` with an `onestop_id` filter — a route/stop is discovered in bulk by geography, and the `find` output already carries the full record, so a dedicated single-fetch tool would duplicate it. Operators and feeds keep a `get` tool (and a resource) because they're the durable, referenceable, ID-first entities an agent revisits.
+Exact route, stop, and feed selection uses the corresponding list tool’s `onestop_id` filter. Operators also have a detail tool, and operators and feeds have resources.
 
 ---
 
@@ -148,7 +148,7 @@ All shapes below were confirmed with live requests against the production API (k
   "meta": { "after": 14356265 },          // cursor; meta.next URL discarded (leaks apikey)
   "operators": [{
     "onestop_id": "o-9q9-bart",           // SURFACE this
-    "id": 14356265,                        // internal integer; accept on input, don't surface as primary
+    "id": 14356265,                        // internal operator ID, used by Transitland
     "name": "Bay Area Rapid Transit",
     "short_name": "BART",                 // often null
     "website": null,                       // often null
@@ -191,7 +191,8 @@ All shapes below were confirmed with live requests against the production API (k
       "redistribution_allowed": "",
       "create_derived_product": "unknown",
       "share_alike_optional": "",
-      "attribution_text": ""
+      "attribution_text": "",
+      "attribution_instructions": ""
     },
     "urls": {
       "static_current": "http://www.bart.gov/dev/schedules/google_transit.zip",  // the fetch URL
@@ -200,10 +201,11 @@ All shapes below were confirmed with live requests against the production API (k
       "realtime_vehicle_positions": "",    // non-empty ⇒ this feed carries GTFS-RT vehicle data
       "realtime_trip_updates": "",
       "realtime_alerts": "",
-      "gbfs_auto_discovery": ""            // non-empty ⇒ GBFS bikeshare feed
+      "gbfs_auto_discovery": "",           // GBFS discovery URL
+      "mds_provider": ""                   // MDS provider URL
     },
     "feed_state": { "feed_version": null },// current version pointer (often null on free tier)
-    "feed_versions": [{                    // request feed_versions.limit=1 — full history is huge (167 for BART)
+    "feed_versions": [{                    // only the first record is surfaced
       "sha1": "c995688a4fd4e9cd780cfda218c02665395dfceb",
       "fetched_at": "2026-06-10T23:22:37.887044Z",   // freshness
       "earliest_calendar_date": "2026-01-31",
@@ -263,7 +265,7 @@ All shapes below were confirmed with live requests against the production API (k
     "stop_url": null,
     "platform_code": null,
     "zone_id": null,
-    "parent": null,                        // parent station onestop_id when this is a child platform
+    "parent": null,                        // may be an object with onestop_id or only an internal id
     "place": { "adm0_iso": "US", "adm0_name": "United States of America", "adm1_iso": "US-CA", "adm1_name": "California" },
     "feed_version": { "feed": { "onestop_id": "f-sf~bay~area~rg" }, "fetched_at": "…", "sha1": "…" }
   }]
@@ -316,19 +318,19 @@ All shapes below were confirmed with live requests against the production API (k
 }
 ```
 
-**The real-time test:** a departure is real-time when `departure.estimated` (equivalently `estimated_utc`) is non-null. The normalized output sets `realtime: true` and exposes `estimatedTime` + `delaySeconds`; otherwise `realtime: false` and only `scheduledTime`. `schedule_relationship` is surfaced verbatim. **Observed values from live API:** `STATIC` = static-schedule-only trip (no RT coverage); `SCHEDULED` = RT-covered trip currently on schedule; `ADDED`/`CANCELED`/`UNSCHEDULED`/`DUPLICATED` = RT mutation states. The "STATIC vs SCHEDULED" split is the primary realtime indicator — `STATIC` means no RT overlay at all, confirmed against NYC MTA GTFS-RT feed.
+**The real-time test:** `realtime` follows the presence of an estimated departure time. `scheduleRelationship` preserves `schedule_relationship`, including trip states such as `CANCELED` and `ADDED`.
 
 ---
 
 ## Tool Specifications
 
-> Conventions across all tools: every Zod field has `.describe()`. `lat`/`lon` are `z.number()` with `.min()/.max()` bounds. Onestop-ID inputs accept the Onestop form or an internal integer ID (passed through to the upstream `*_key` path param or `ids` filter); the description states both. Geography-capable tools name the `openstreetmap_geocode` pre-step. Capped-list tools put truncation disclosure in `enrichment` (not `output`) and always emit `totalCount` via `ctx.enrich.total()`.
+> Geographic inputs use bounded latitude and longitude and a shared `bboxSchema` with a JSON Schema pattern. A box is four finite numbers in `minLon,minLat,maxLon,maxLat` order with each minimum ≤ its maximum and the same axis bounds as a point. Decimal and exponent notation are accepted. A blank string leaves the filter unset. Combining a box with a point/radius searches their intersection. Malformed boxes produce `invalid_arguments` before I/O. Capped lists disclose page count, cap, and continuation in `enrichment`.
 
 ---
 
 ### `transitland_find_operators`
 
-**Description:** Find transit operators/agencies by name, near a point or within a bounding box, by country/region, or by Onestop ID. Returns each operator's Onestop ID, name, the agencies it covers, the places it serves, and the feeds it publishes. The entry point for "what transit runs here?". Transitland does not geocode place names — geocode a city to coordinates with `openstreetmap_geocode` first, then pass `lat` and `lon` (with an optional `radius`) or a `bbox`. Provide at least one of: `search`, `lat`+`lon`, `bbox`, `onestop_id`, or a place filter.
+**Description:** Find transit operators/agencies by name, near a point or within a bounding box, by country/region, or by Onestop ID. Returns each operator's Onestop ID, name, the agencies it covers, the places it serves, and the feeds it publishes. The entry point for "what transit runs here?". Transitland does not geocode place names — geocode a city to coordinates with `openstreetmap_search_places` first, then pass `lat` and `lon` (with an optional `radius`) or a `bbox`. Provide at least one of: `search`, `lat`+`lon`, `bbox`, `onestop_id`, or a place filter.
 
 **Input schema:**
 
@@ -337,15 +339,14 @@ z.object({
   search: z.string().optional()
     .describe('Full-text search over operator and agency names (e.g. "BART", "Sound Transit"). Upstream-ranked. Combine with a place filter to disambiguate common names.'),
   onestop_id: z.string().optional()
-    .describe('Operator Onestop ID (e.g. "o-9q9-bart") or internal integer ID, for a direct lookup. When set, other filters are ignored. For the complete record prefer transitland_get_operator.'),
+    .describe('Operator Onestop ID (e.g. "o-9q9-bart"). For the complete record, use transitland_get_operator.'),
   lat: z.number().min(-90).max(90).optional()
-    .describe('Latitude of the search center (WGS84 decimal degrees). Requires lon. Transitland does not geocode — use openstreetmap_geocode to turn a place name into coordinates first.'),
+    .describe('Latitude of the search center (WGS84 decimal degrees). Requires lon. Transitland does not geocode — use openstreetmap_search_places to turn a place name into coordinates first.'),
   lon: z.number().min(-180).max(180).optional()
     .describe('Longitude of the search center (WGS84 decimal degrees). Requires lat.'),
   radius: z.number().min(0).max(100000).default(1000)
     .describe('Search radius in meters around lat/lon (max 100,000). Operators are matched when their service area intersects the radius.'),
-  bbox: z.string().optional()
-    .describe('Bounding box "minLon,minLat,maxLon,maxLat" (e.g. "-122.5,37.7,-122.3,37.9"). Alternative to lat/lon/radius for area surveys. Cannot be combined with lat/lon.'),
+  bbox: bboxSchema,
   adm0_name: z.string().optional()
     .describe('Filter to a country by full English name (e.g. "United States of America", "Germany"). Coarse — pair with search or geography to narrow.'),
   adm1_name: z.string().optional()
@@ -353,7 +354,7 @@ z.object({
   limit: z.number().int().min(1).default(20)
     .describe('Maximum operators to return. Values above 100 apply the 100-result page cap with a notice. Page further with the after cursor.'),
   after: z.number().int().optional()
-    .describe('Pagination cursor from a previous response (enrichment.cursor). Returns the next page after this internal ID.'),
+    .describe('Pass cursor as after with the same filters. The next page may be empty.'),
 })
 ```
 
@@ -372,7 +373,7 @@ z.object({
       city: z.string().nullable().describe('City name. Null when the agency spans no single city.'),
     })).describe('Distinct places this operator serves, summarized from its agencies. Empty when unmapped.'),
     feeds: z.array(z.object({
-      onestopId: z.string().describe('Feed Onestop ID. Pass to transitland_find_feeds (operator_onestop_id) or look up directly.'),
+      onestopId: z.string().describe('Feed Onestop ID. Pass as onestop_id to transitland_find_feeds.'),
       spec: z.string().describe('Feed spec: GTFS, GTFS_RT, GBFS, or MDS.'),
       name: z.string().nullable().describe('Feed name. Often null.'),
     })).describe('Feeds this operator publishes. The bridge to the open-data catalog — a GTFS_RT entry here means real-time departures may be available.'),
@@ -386,11 +387,11 @@ z.object({
 ```ts
 enrichment: {
   totalCount: z.number().describe('Number of operators returned.'),
-  cursor: z.number().optional().describe('Pass as `after` to fetch the next page. Present only when more results exist.'),
+  cursor: z.number().optional().describe('Pass as after with the same filters. The next page may be empty.'),
   truncated: z.boolean().optional().describe('True when results were capped at the limit.'),
   shown: z.number().optional().describe('Number of operators returned.'),
   cap: z.number().optional().describe('The limit applied.'),
-  notice: z.string().optional().describe('Guidance when nothing matched (e.g. geocode-first reminder).'),
+  notice: z.string().optional().describe('Page status, continuation guidance, or service notices.'),
 }
 ```
 
@@ -400,7 +401,7 @@ enrichment: {
 errors: [
   { reason: 'no_filter', code: JsonRpcErrorCode.ValidationError,
     when: 'No search, coordinates, bbox, onestop_id, or place filter was provided (server-enforced guard — the API accepts unfiltered requests but returns a paginated global dump)',
-    recovery: 'Provide at least one of: search, lat+lon, bbox, onestop_id, or adm0_name. For a place, geocode it with openstreetmap_geocode first.' },
+    recovery: 'Provide at least one of: search, lat+lon, bbox, onestop_id, or adm0_name. For a place, geocode it with openstreetmap_search_places first.' },
   { reason: 'incomplete_point', code: JsonRpcErrorCode.ValidationError,
     when: 'lat without lon or lon without lat',
     recovery: 'Provide both lat and lon together, or use bbox instead for an area.' },
@@ -410,7 +411,7 @@ errors: [
 ]
 ```
 
-On empty results the handler returns `operators: []` and calls `ctx.enrich.notice(...)` (not an error) — "no operators" is a valid answer; the notice reminds the agent to geocode-first if it passed a place name.
+An all-digit operator filter returns an empty page and Onestop ID guidance without an upstream call. First-page misses carry query guidance; empty continuations report that the listing is exhausted.
 
 **Annotations:** `readOnlyHint: true`, `openWorldHint: true`
 
@@ -418,14 +419,14 @@ On empty results the handler returns `operators: []` and calls `ctx.enrich.notic
 
 ### `transitland_get_operator`
 
-**Description:** Fetch the full operator record by Onestop ID or internal integer ID — the agencies it covers, the places served, the feeds it publishes, and source tags (Wikidata QID, US NTD ID, social handles). Use when you already hold an operator ID and want the complete record without a search round-trip.
+**Description:** Fetch the full operator record by Onestop ID — the agencies it covers, the places served, the feeds it publishes, and source tags (Wikidata QID, US NTD ID, social handles). Use when you already hold an operator ID and want the complete record without a search round-trip.
 
 **Input schema:**
 
 ```ts
 z.object({
   operator_key: z.string()
-    .describe('Operator Onestop ID (e.g. "o-9q9-bart") or internal integer ID. Get one from transitland_find_operators or an operator reference in another result.'),
+    .describe('Operator Onestop ID (e.g. "o-9q9-bart"). Get one from transitland_find_operators or an operator reference in another result.'),
 })
 ```
 
@@ -447,7 +448,7 @@ z.object({
     })).describe('Places this agency serves.'),
   })).describe('Agencies grouped under this operator. A single operator may bundle several GTFS agencies.'),
   feeds: z.array(z.object({
-    onestopId: z.string().describe('Feed Onestop ID. Pass to transitland_find_feeds or the feed resource for license + fetch URL.'),
+    onestopId: z.string().describe('Feed Onestop ID. Pass as onestop_id to transitland_find_feeds or use the feed resource.'),
     spec: z.string().describe('Feed spec: GTFS, GTFS_RT, GBFS, or MDS.'),
     name: z.string().nullable().describe('Feed name. Often null.'),
   })).describe('Feeds this operator publishes.'),
@@ -464,7 +465,7 @@ z.object({
 ```ts
 errors: [
   { reason: 'operator_not_found', code: JsonRpcErrorCode.NotFound,
-    when: 'No operator exists for the given Onestop ID or internal ID',
+    when: 'The key is numeric or no operator matches the supplied Onestop ID',
     recovery: 'Verify the ID format (e.g. "o-9q9-bart") or search with transitland_find_operators to get a valid Onestop ID.' },
   { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429',
@@ -480,12 +481,14 @@ errors: [
 
 The standout tool. Surfaces where to legally get open transit data and on what terms.
 
-**Description:** Discover GTFS, GTFS-Realtime, and GBFS feeds in the open-data registry. Filter by operator (Onestop ID), feed spec, fetch state, or a search term. Each feed returns its Onestop ID, spec, the fetch URL to download the data, the license terms (redistribution, commercial use, attribution, SPDX identifier where known), and last-fetch freshness (when it was retrieved and the calendar window it covers). Use this to answer "where do I get this agency's GTFS, and may I redistribute it?". Discover feeds by operator (`operator_onestop_id`) for reliable results — radius filtering on feeds is coarse because a feed's geometry spans its whole coverage area.
+**Description:** Find GTFS, GTFS-Realtime, GBFS, and MDS feeds by exact ID, operator, spec, search, or fetch state. Returns the feed’s URL, license terms, and the selected version’s recorded fetch timestamp and service dates.
 
 **Input schema:**
 
 ```ts
 z.object({
+  onestop_id: z.string().optional()
+    .describe('Exact feed Onestop ID or positive internal feed ID as a string. Combines with the other filters.'),
   operator_onestop_id: z.string().optional()
     .describe('Restrict to feeds published by this operator (Onestop ID, e.g. "o-9q9-bart"). The reliable way to find a specific agency\'s feeds — get the ID from transitland_find_operators.'),
   spec: z.string().pipe(z.preprocess(value => typeof value === 'string' ? value.toLowerCase().replace(/_/g, '-') : value, z.enum(['gtfs', 'gtfs-rt', 'gbfs', 'mds']))).optional()
@@ -495,9 +498,9 @@ z.object({
   fetch_error: z.boolean().optional()
     .describe('When true, return only feeds whose most recent fetch failed (stale/broken sources). When false, only successfully-fetched feeds. Omit for both. Useful for data-quality auditing.'),
   limit: z.number().int().min(1).default(20)
-    .describe('Maximum feeds to return. Values above 100 apply the 100-result cap with a notice. Page further with the after cursor.'),
+    .describe('Maximum feeds to return. Values above 100 apply the 100-result cap with a notice.'),
   after: z.number().int().optional()
-    .describe('Pagination cursor from a previous response (enrichment.cursor).'),
+    .describe('Pass cursor as after with the same filters. The next page may be empty. Operator-scoped feeds ignore after and return a notice.'),
 })
 ```
 
@@ -509,12 +512,12 @@ z.object({
     onestopId: z.string().describe('Feed Onestop ID (e.g. "f-9q9-bart"). The durable handle for this feed.'),
     spec: z.string().describe('Feed spec: GTFS, GTFS_RT, GBFS, or MDS.'),
     name: z.string().nullable().describe('Feed name. Often null for single-operator feeds.'),
-    fetchUrl: z.string().nullable().describe('Direct URL to download the current feed data (the GTFS .zip for static feeds; the realtime endpoint for GTFS-RT/GBFS). Null when the registry has no current URL.'),
+    fetchUrl: z.string().nullable().describe('Download or discovery URL for the feed spec, when recorded.'),
     realtimeUrls: z.object({
       tripUpdates: z.string().nullable().describe('GTFS-RT trip-updates endpoint (delays/predictions). Non-null ⇒ this feed powers real-time departures.'),
       vehiclePositions: z.string().nullable().describe('GTFS-RT vehicle-positions endpoint.'),
       alerts: z.string().nullable().describe('GTFS-RT service-alerts endpoint.'),
-    }).describe('Real-time endpoints when the feed carries GTFS-RT. All null for a static-only GTFS feed.'),
+    }).describe('GTFS-Realtime endpoints. All null when the registry lists none.'),
     license: z.object({
       spdxIdentifier: z.string().nullable().describe('SPDX license identifier (e.g. "CC-BY-4.0") when the registry knows it. Null/unknown is common — do not infer a license that is not stated.'),
       url: z.string().nullable().describe('URL of the license or terms-of-use document.'),
@@ -522,14 +525,16 @@ z.object({
       commercialUseAllowed: z.enum(['yes', 'no', 'unknown']).describe('Whether commercial use is permitted.'),
       createDerivedProduct: z.enum(['yes', 'no', 'unknown']).describe('Whether derived products are permitted.'),
       useWithoutAttribution: z.enum(['yes', 'no', 'unknown']).describe('Whether attribution can be omitted. "no"/"unknown" ⇒ attribute the source.'),
+      shareAlikeOptional: z.enum(['yes', 'no', 'unknown']).describe('Whether share-alike terms are optional.'),
       attributionText: z.string().nullable().describe('Required attribution text, when specified.'),
+      attributionInstructions: z.string().nullable().describe('Attribution instructions, when specified.'),
     }).describe('License/terms as recorded by Transitland. Empty registry fields are normalized to "unknown" or null — never fabricated. Confirm against the license url before redistributing.'),
     latestFetch: z.object({
-      fetchedAt: z.string().nullable().describe('ISO 8601 timestamp of the most recent successful fetch (data freshness).'),
+      fetchedAt: z.string().nullable().describe('ISO 8601 timestamp recorded on the selected feed version.'),
       earliestServiceDate: z.string().nullable().describe('Earliest calendar date the current data covers (YYYY-MM-DD).'),
       latestServiceDate: z.string().nullable().describe('Latest calendar date the current data covers — when service data runs out.'),
       sha1: z.string().nullable().describe('Content hash of the fetched feed version.'),
-    }).describe('Freshness of the current feed version. fetchedAt long in the past or latestServiceDate near today signals stale data.'),
+    }).describe('Selected feed version metadata.'),
     authorizationRequired: z.boolean().describe('True when fetching the feed itself needs a separate API key/registration (the fetchUrl alone is insufficient).'),
   })).describe('Matching feeds with fetch URLs, license terms, and freshness.'),
 })
@@ -542,7 +547,7 @@ z.object({
 ```ts
 errors: [
   { reason: 'no_filter', code: JsonRpcErrorCode.ValidationError,
-    when: 'No operator_onestop_id, spec, search, or fetch_error filter was provided (server-enforced guard — the upstream API accepts unfiltered requests but returns a global firehose)',
+    when: 'No onestop_id, operator_onestop_id, spec, search, or fetch_error filter was provided (server-enforced guard — the upstream API accepts unfiltered requests but returns a global firehose)',
     recovery: 'Provide at least one filter — operator_onestop_id (from transitland_find_operators) is the most reliable.' },
   { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429',
@@ -550,7 +555,7 @@ errors: [
 ]
 ```
 
-> An unfiltered feeds query is allowed by the API (verified: returns data with no params) but produces a global firehose; the `no_filter` contract is server-enforced and requires at least one filter so the agent gets a useful, paginated slice. (Logged.)
+> Exact lookups verify the returned identity and retain the filters. Zero, unknown, and comma-joined feed IDs return an empty page. Exact results have no cursor. Operator scope uses the operator's feed references for membership. It filters by spec on the references and applies search and fetch state through exact feed list queries. Matching records keep operator feed order and share one limit. When no exact ID, search, or fetch state is supplied, the service fetches feed details and reports missing references in a notice. Operator results have no cursor and report any supplied `after` as ignored. A numeric or unknown operator key returns `operator_not_found`.
 
 **Annotations:** `readOnlyHint: true`, `openWorldHint: true`
 
@@ -558,24 +563,23 @@ errors: [
 
 ### `transitland_find_routes`
 
-**Description:** Find routes near a point, within a bounding box, by operator, by Onestop ID, or by mode. Returns each route's Onestop ID, short and long name, mode (bus, rail, ferry, subway, tram, …), brand color, and the operating agency's Onestop ID. Geocode place names to coordinates with `openstreetmap_geocode` before passing `lat`/`lon`. Provide at least one of: `lat`+`lon`, `bbox`, `operator_onestop_id`, `onestop_id`, or `search`.
+**Description:** Find routes near a point, within a bounding box, by operator, by Onestop ID, or by mode. Returns each route's Onestop ID, short and long name, mode (bus, rail, ferry, subway, tram, …), brand color, and the operating agency's Onestop ID. Geocode place names to coordinates with `openstreetmap_search_places` before passing `lat`/`lon`. Provide at least one of: `lat`+`lon`, `bbox`, `operator_onestop_id`, `onestop_id`, or `search`.
 
 **Input schema:**
 
 ```ts
 z.object({
   lat: z.number().min(-90).max(90).optional()
-    .describe('Latitude of the search center (WGS84). Requires lon. Geocode place names with openstreetmap_geocode first — Transitland does not accept place names.'),
+    .describe('Latitude of the search center (WGS84). Requires lon. Geocode place names with openstreetmap_search_places first — Transitland does not accept place names.'),
   lon: z.number().min(-180).max(180).optional()
     .describe('Longitude of the search center (WGS84). Requires lat.'),
   radius: z.number().min(0).max(50000).default(1000)
     .describe('Search radius in meters around lat/lon (max 50,000). Routes are matched when they pass within the radius.'),
-  bbox: z.string().optional()
-    .describe('Bounding box "minLon,minLat,maxLon,maxLat". Alternative to lat/lon/radius. Cannot be combined with lat/lon.'),
+  bbox: bboxSchema,
   operator_onestop_id: z.string().optional()
     .describe('Restrict to routes operated by this operator (Onestop ID, e.g. "o-9q9-bart"). Combine with search to find a specific line within an operator.'),
   onestop_id: z.string().optional()
-    .describe('Fetch one route directly by its Onestop ID (e.g. "r-9q9p-800") or internal integer ID.'),
+    .describe('Fetch one route directly by its Onestop ID (e.g. "r-9q9p-800") or internal integer ID as a string. Combines with other filters.'),
   route_type: z.number().int().optional()
     .describe('GTFS route_type filter: 0=tram/streetcar, 1=subway/metro, 2=rail, 3=bus, 4=ferry, 5=cable tram, 6=aerial lift, 7=funicular, 11=trolleybus, 12=monorail. Omit for all modes.'),
   search: z.string().optional()
@@ -583,7 +587,7 @@ z.object({
   limit: z.number().int().min(1).default(20)
     .describe('Maximum routes to return. Values above 100 apply the 100-result cap with a notice. Page further with the after cursor.'),
   after: z.number().int().optional()
-    .describe('Pagination cursor from a previous response (enrichment.cursor).'),
+    .describe('Pass cursor as after with the same filters. The next page may be empty.'),
 })
 ```
 
@@ -603,7 +607,7 @@ z.object({
       onestopId: z.string().nullable().describe('Operating agency Onestop ID (e.g. "o-dr5r-nyct"). Use with transitland_get_operator.'),
       name: z.string().describe('Operating agency name.'),
     }).describe('The agency that runs this route.'),
-    feedOnestopId: z.string().nullable().describe('Onestop ID of the feed this route came from. Pass to transitland_find_feeds for the source data and license.'),
+    feedOnestopId: z.string().nullable().describe('Onestop ID of the feed this route came from. Pass as onestop_id to transitland_find_feeds for the source data and license.'),
   })).describe('Matching routes, upstream-ranked.'),
 })
 ```
@@ -616,7 +620,7 @@ z.object({
 errors: [
   { reason: 'no_filter', code: JsonRpcErrorCode.ValidationError,
     when: 'No coordinates, bbox, operator, onestop_id, or search provided',
-    recovery: 'Provide at least one of: lat+lon, bbox, operator_onestop_id, onestop_id, or search. Geocode place names with openstreetmap_geocode first.' },
+    recovery: 'Provide at least one of: lat+lon, bbox, operator_onestop_id, onestop_id, or search. Geocode place names with openstreetmap_search_places first.' },
   { reason: 'incomplete_point', code: JsonRpcErrorCode.ValidationError,
     when: 'lat without lon or lon without lat',
     recovery: 'Provide both lat and lon together, or use bbox for an area.' },
@@ -639,15 +643,14 @@ errors: [
 ```ts
 z.object({
   lat: z.number().min(-90).max(90).optional()
-    .describe('Latitude of the search center (WGS84). Requires lon. Geocode place names with openstreetmap_geocode first.'),
+    .describe('Latitude of the search center (WGS84). Requires lon. Geocode place names with openstreetmap_search_places first.'),
   lon: z.number().min(-180).max(180).optional()
     .describe('Longitude of the search center (WGS84). Requires lat.'),
   radius: z.number().min(0).max(10000).default(500)
     .describe('Search radius in meters around lat/lon (max 10,000). Keep small (≤500m) in dense areas — stations multiply quickly.'),
-  bbox: z.string().optional()
-    .describe('Bounding box "minLon,minLat,maxLon,maxLat". Alternative to lat/lon/radius. Cannot be combined with lat/lon.'),
+  bbox: bboxSchema,
   onestop_id: z.string().optional()
-    .describe('Fetch one stop directly by its Onestop ID (e.g. "s-9q8yyw3xjw-powell") or internal integer ID.'),
+    .describe('Fetch one stop directly by its Onestop ID (e.g. "s-9q8yyw3xjw-powell") or internal integer ID as a string. Combines with other filters.'),
   served_by_onestop_ids: z.string().optional()
     .describe('Restrict to stops served by these operators or routes — a comma-separated list of operator/route Onestop IDs (e.g. "o-9q9-bart"). Combine with geography to find an operator\'s stops in an area.'),
   search: z.string().optional()
@@ -655,7 +658,7 @@ z.object({
   limit: z.number().int().min(1).default(20)
     .describe('Maximum stops to return. Values above 100 apply the 100-result cap with a notice. Page further with the after cursor.'),
   after: z.number().int().optional()
-    .describe('Pagination cursor from a previous response (enrichment.cursor).'),
+    .describe('Pass cursor as after with the same filters. The next page may be empty.'),
 })
 ```
 
@@ -667,23 +670,27 @@ z.object({
     onestopId: z.string().describe('Stable public Onestop ID (e.g. "s-9q8yyw3xjw-powell"). Pass to transitland_get_departures.'),
     name: z.string().nullable().describe('Stop/station name. Null for unnamed generic nodes (location_type 3).'),
     code: z.string().nullable().describe('Public stop code printed on signage, when published. Null otherwise.'),
+    platformCode: z.string().nullable().describe('Platform code when published.'),
+    description: z.string().nullable().describe('Stop description when published.'),
     lat: z.number().nullable().describe('Latitude (WGS84). Null when upstream coordinates are missing.'),
     lon: z.number().nullable().describe('Longitude (WGS84). Null when upstream coordinates are missing.'),
     locationType: z.number().describe('GTFS location_type: 0=platform/stop, 1=station, 2=entrance/exit, 3=generic node, 4=boarding area.'),
     locationTypeLabel: z.string().describe('Human-readable location type: stop, station, entrance, node, or boarding area.'),
     wheelchairBoarding: z.enum(['accessible', 'not_accessible', 'unknown']).describe('Wheelchair accessibility, mapped from GTFS (1/2/0).'),
     timezone: z.string().nullable().describe('IANA timezone of the stop (e.g. "America/Los_Angeles"). Null when the feed omits it.'),
-    parentOnestopId: z.string().nullable().describe('Onestop ID of the parent station when this is a child platform. Null for top-level stops.'),
+    parentOnestopId: z.string().nullable().describe('Parent station Onestop ID when known. Null for top-level stops or unresolved parents.'),
     place: z.object({
       country: z.string().nullable(),
       region: z.string().nullable(),
     }).describe('Country/region the stop sits in.'),
-    feedOnestopId: z.string().nullable().describe('Onestop ID of the source feed. Pass to transitland_find_feeds for license/fetch URL.'),
-  })).describe('Matching stops. Departures attach to platform-level stops (location_type 0) — a station (type 1) may return no departures; use its child platforms.'),
+    feedOnestopId: z.string().nullable().describe('Onestop ID of the source feed. Pass as onestop_id to transitland_find_feeds for license/fetch URL.'),
+  })).describe('Matching stops and stations. Use the parent station ID for station-wide departures.'),
 })
 ```
 
 **Enrichment block:** same shape as `find_operators`.
+
+Parent links come from the embedded Onestop ID or a matching record in the page. The service looks up each remaining internal parent ID once per page with bounded concurrency and a shared deadline. Absent parents remain null. Unavailable or unreadable optional lookups leave the page usable and add an enrichment notice.
 
 **Error contract:**
 
@@ -691,7 +698,7 @@ z.object({
 errors: [
   { reason: 'no_filter', code: JsonRpcErrorCode.ValidationError,
     when: 'No coordinates, bbox, onestop_id, served_by_onestop_ids, or search provided',
-    recovery: 'Provide at least one of: lat+lon, bbox, onestop_id, served_by_onestop_ids, or search. For geographic queries, geocode place names with openstreetmap_geocode first.' },
+    recovery: 'Provide at least one of: lat+lon, bbox, onestop_id, served_by_onestop_ids, or search. For geographic queries, geocode place names with openstreetmap_search_places first.' },
   { reason: 'incomplete_point', code: JsonRpcErrorCode.ValidationError,
     when: 'lat without lon or lon without lat',
     recovery: 'Provide both lat and lon together, or use bbox for an area.' },
@@ -707,31 +714,33 @@ errors: [
 
 ### `transitland_get_departures`
 
-The real-time-aware tool. Distinguishes live predictions from static schedule.
-
-**Description:** Departures from a stop by Onestop ID or internal ID. Returns each upcoming departure's route, headsign, trip, and scheduled time — plus the real-time predicted time and delay **only where the feed publishes GTFS-Realtime**. Every departure carries a `realtime` flag and a `schedule_relationship` so a static timetable entry is never mistaken for a live arrival, and cancellations/added trips are visible. Resolve a stop to its Onestop ID with `transitland_find_stops` first. Departures attach to platform-level stops; a parent station may return none — query its child platforms. If a stop returns no departures, widen `next_seconds` or set `use_service_window: true` (some feeds only expose times inside their active service window).
+**Description:** Get departures and service alerts for a stop or station by Onestop or internal stop ID. Station results merge direct and child departures, sort by estimated departure instant when available and scheduled instant otherwise, then apply one global limit. Untimed rows follow timed rows and ties preserve upstream order. The platform, service date, prediction, and schedule relationship are carried per row.
 
 **Input schema:**
 
 ```ts
 z.object({
   stop_key: z.string()
-    .describe('Stop Onestop ID (e.g. "s-9q8yyw3xjw-powell") or internal integer ID. Get one from transitland_find_stops. Use a platform-level stop (location_type 0); a station may return no departures.'),
+    .describe('Stop, station, or platform Onestop ID (e.g. "s-9q8yyw3xjw-powell") or internal integer ID. Get one from transitland_find_stops.'),
   next_seconds: z.number().int().min(60).max(86400).default(3600)
-    .describe('Look-ahead window in seconds from now (max 86,400 = 24h). Default 3600 (1h). Widen when a stop has infrequent service or returns nothing.'),
+    .describe('Window in seconds from now or from start_time. Ignored when service_date is set without start_time.'),
   service_date: z.union([
     z.literal(''),
-    z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe('Service date as YYYY-MM-DD'),
+    z.iso.date().describe('Service date as YYYY-MM-DD'),
   ]).optional()
-    .describe('Restrict to a specific service date (YYYY-MM-DD), e.g. to check a future day\'s schedule. Empty string or omitted uses today. Real-time predictions only apply to the current service day.'),
+    .describe('A GTFS service date. Defaults to its first departure. Omit or pass an empty string for the current-time window.'),
+  start_time: z.string().regex(/^\d{2,}:[0-5]\d:[0-5]\d$/).optional()
+    .describe('GTFS HH:MM:SS. Requires service_date. Hours can exceed 23.'),
   use_service_window: z.boolean().default(false)
-    .describe('When true, clamp the query into the feed\'s active service window. Set this if a default query returns no departures — some feeds only publish times within their declared calendar window.'),
+    .describe('Allow Transitland to fall back to a typical service day outside the feed calendar.'),
   limit: z.number().int().min(1).default(20)
     .describe('Maximum departures to return. Values above 100 apply the 100-result cap with a notice, ordered by departure time.'),
 })
 ```
 
 **Output schema:**
+
+Each alert has nullable `header`, `description`, `url`, `effect`, `cause`, and `severity`, plus `activePeriods` with nullable ISO `start` and `end`. Text and URL use the first translation. Stop alerts cover the queried stop and its returned descendants, including entrances. A shared `rt_feed_onestop_id` and `entity_id` identify duplicate stop alerts. Alerts without either identity component are preserved. Trip alerts stay with their own departure.
 
 ```ts
 z.object({
@@ -740,12 +749,19 @@ z.object({
     name: z.string().nullable().describe('Stop name.'),
     timezone: z.string().nullable().describe('IANA timezone the departure wall-clock times are in.'),
   }).describe('The stop the departures belong to.'),
+  alerts: z.array(alertSchema).describe('Service alerts for the stop and its returned children.'),
   departures: z.array(z.object({
     realtime: z.boolean().describe('TRUE when this time is a live GTFS-Realtime prediction; FALSE when it is a static scheduled time. The single most important field — never present a FALSE time as a live arrival.'),
     scheduleRelationship: z.string().describe('Schedule relationship: STATIC (static-schedule trip, no real-time overlay), SCHEDULED (real-time covered, currently on time), ADDED, CANCELED, UNSCHEDULED, or DUPLICATED. STATIC is the common non-RT value; SCHEDULED indicates RT overlay is active. CANCELED ⇒ trip not running even if it appears in the schedule.'),
-    scheduledTime: z.string().describe('Scheduled departure as an ISO 8601 timestamp with the stop\'s UTC offset (e.g. "2026-06-13T16:21:07-04:00").'),
+    scheduledTime: z.string().describe('Scheduled departure timestamp, or an empty string when absent.'),
     estimatedTime: z.string().nullable().describe('Predicted departure (ISO 8601 with offset) when realtime=true. Null when scheduled-only.'),
     delaySeconds: z.number().nullable().describe('Predicted delay in seconds: positive = late, negative = early. Null when no real-time data backs this departure.'),
+    serviceDate: z.string().nullable().describe('GTFS service date supplied by Transitland.'),
+    platform: z.object({
+      onestopId: z.string().nullable().describe('Onestop ID of the stop or platform supplying this departure.'),
+      code: z.string().nullable().describe('Platform code when published.'),
+    }).describe('Boarding location for this departure.'),
+    alerts: z.array(alertSchema).optional().describe('Alerts associated with this trip, when present.'),
     headsign: z.string().nullable().describe('Trip or stop headsign (the destination shown on the vehicle, e.g. "14 ST via 7 AV"). Null when omitted.'),
     route: z.object({
       onestopId: z.string().describe('Route Onestop ID (e.g. "r-dr72h-m7"). Use with transitland_find_routes.'),
@@ -759,7 +775,7 @@ z.object({
     directionId: z.number().nullable().describe('GTFS direction_id (0 or 1), distinguishing the two directions of travel. Null when omitted.'),
     wheelchairAccessible: z.enum(['accessible', 'not_accessible', 'unknown']).describe('Trip-level wheelchair accessibility, where the feed states it.'),
   })).describe('Upcoming departures ordered by departure time. A mix of realtime=true and realtime=false entries is normal — only the GTFS-RT-covered trips carry predictions.'),
-  realtimeAvailable: z.boolean().describe('True when at least one departure carried a real-time prediction — i.e. this stop\'s feed publishes GTFS-RT. False ⇒ all times are scheduled.'),
+  realtimeAvailable: z.boolean().describe('True when at least one returned departure carries a real-time prediction.'),
 })
 ```
 
@@ -767,11 +783,11 @@ z.object({
 
 ```ts
 enrichment: {
-  totalCount: z.number().describe('Number of departures returned (the API caps server-side; this is the count in the window).'),
+  totalCount: z.number().describe('Number of departures returned after merging and capping.'),
   truncated: z.boolean().optional().describe('True when departures were capped at the limit.'),
   shown: z.number().optional().describe('Number of departures returned.'),
   cap: z.number().optional().describe('The limit applied.'),
-  notice: z.string().optional().describe('Guidance when empty — e.g. "No departures in the next 3600s; widen next_seconds or set use_service_window=true. A station may have no direct departures — try a child platform."'),
+  notice: z.string().optional().describe('Guidance for the requested time window when no departures were found.'),
 }
 ```
 
@@ -779,6 +795,9 @@ enrichment: {
 
 ```ts
 errors: [
+  { reason: 'start_time_requires_service_date', code: JsonRpcErrorCode.ValidationError,
+    when: 'start_time is supplied without a service_date',
+    recovery: 'Provide a service_date or omit start_time for departures from now.' },
   { reason: 'stop_not_found', code: JsonRpcErrorCode.NotFound,
     when: 'The stops array in the API response is empty for the given Onestop ID or internal ID — the API returns HTTP 200 + {"stops":[]} (not a 404) when the stop does not exist. The handler must detect this from the empty stops array, not from an HTTP status.',
     recovery: 'Verify the ID (e.g. "s-9q8yyw3xjw-powell") or locate the stop with transitland_find_stops.' },
@@ -790,7 +809,7 @@ errors: [
 
 > **IMPLEMENTATION NOTE:** `GET /stops/{key}/departures` returns a populated stop record with an empty `departures` array when the stop exists but has no departures in the window. A completely empty `stops` array means no stop record exists and produces `stop_not_found`. The service distinguishes these response shapes in the single departures request; no pre-flight lookup or additional ID-format guard is needed.
 
-Empty departures is **not** an error — the handler returns `departures: []`, `realtimeAvailable: false`, and an actionable `ctx.enrich.notice(...)` covering the widen-window / child-platform recoveries (the most common real-world cause of an empty result, confirmed during probing on the SF Bay 511 regional feed).
+A known stop with no departures returns `departures: []`, `realtimeAvailable: false`, any stop alerts, and guidance for the requested time window. The current-time query uses `next`. An explicit service date omits `next`. When `start_time` is supplied, the request includes `end_time` computed by adding `next_seconds` without wrapping at midnight. For example, `23:00:00` plus 10,800 seconds yields `26:00:00`. Rows carry the upstream service date even after calendar midnight.
 
 **Annotations:** `readOnlyHint: true`, `openWorldHint: true`
 
@@ -804,15 +823,15 @@ Empty departures is **not** an error — the handler returns `departures: []`, `
 
 | # | Tool | Purpose |
 |:--|:-----|:--------|
-| 1 | `openstreetmap_geocode` (OSM server) | "Powell St, San Francisco" → `{lat, lon}` |
-| 2 | `transitland_find_stops` | coordinates + small radius → stop Onestop IDs (pick a platform, location_type 0) |
+| 1 | `openstreetmap_search_places` (OSM server) | "Powell St, San Francisco" → `{lat, lon}` |
+| 2 | `transitland_find_stops` | coordinates + small radius → stop Onestop IDs (choose a station for all returned platforms or a platform to scope the search) |
 | 3 | `transitland_get_departures` | stop Onestop ID → scheduled + real-time departures |
 
 ### "Where do I get <city>'s transit data, and may I use it?"
 
 | # | Tool | Purpose |
 |:--|:-----|:--------|
-| 1 | `openstreetmap_geocode` | city → coordinates |
+| 1 | `openstreetmap_search_places` | city → coordinates |
 | 2 | `transitland_find_operators` | coordinates → operators serving the area, each with its feed Onestop IDs |
 | 3 | `transitland_find_feeds` | `operator_onestop_id` → fetch URLs + license terms + freshness |
 
@@ -820,7 +839,7 @@ Empty departures is **not** an error — the handler returns `departures: []`, `
 
 | # | Tool | Purpose |
 |:--|:-----|:--------|
-| 1 | `openstreetmap_geocode` | place → coordinates |
+| 1 | `openstreetmap_search_places` | place → coordinates |
 | 2 | `transitland_find_operators` | who runs transit here |
 | 3 | `transitland_find_feeds` (per operator) | open-data sources + licenses |
 | 4 | `transitland_find_routes` | headline routes near the center |
@@ -834,9 +853,9 @@ A consolidated single-call "place profile" workflow tool was considered and **de
 
 **Six tools, REST-shaped.** The surface mirrors Transitland's resource hierarchy (operators, feeds, routes, stops, departures) because that hierarchy *is* the user's mental model — "who runs transit here → where's their data → what routes/stops → when's the next one." No multi-source aggregation (single upstream), no mode-consolidation (the five nouns are genuinely distinct operations with different inputs).
 
-**Onestop IDs are the surfaced identity, internal IDs accepted on input.** Every ID-bearing input accepts both forms (Transitland's `{key}` path params and `ids`/`*_onestop_id` filters take either); every output surfaces the Onestop ID. Onestop IDs are stable, public, and human-legible (`o-9q9-bart`); internal integers are deployment-mutable and meaningless across instances. This is the single most important output convention.
+**Onestop IDs are the public identifiers.** Stops, routes, and feeds translate numeric exact-list input to the upstream singular `id` filter and verify returned identities. Operator detail and list filtering use the operator Onestop ID. Internal IDs can change across deployments.
 
-**Geocode place names for geographic queries.** `openstreetmap_geocode` resolves place → coordinates before Transitland resolves coordinates → transit. Operator/route/stop name searches accept `search` directly and need no geocoding.
+**Geocode place names for geographic queries.** `openstreetmap_search_places` resolves place → coordinates before Transitland resolves coordinates → transit. Operator/route/stop name searches accept `search` directly and need no geocoding.
 
 **The feed registry leads.** `find_feeds` is the one capability no other fleet server has — license + fetch URL + freshness for open transit data. Its description and output lean into "where do I legally get this data and on what terms." License fields are normalized to explicit `yes`/`no`/`unknown` (or null) and the schema descriptions forbid inferring a permissive license from a blank registry field — honesty about uncertainty over fabricated confidence.
 
@@ -846,23 +865,23 @@ A consolidated single-call "place profile" workflow tool was considered and **de
 
 **`meta.next` is never surfaced.** The pagination `meta.next` URL embeds the apikey in plaintext (verified). The service returns only the opaque integer `after` cursor; surfacing `next` would leak the key to the agent/client and into logs.
 
-**Feed-version history is sliced to latest.** The feeds endpoint returns the entire `feed_versions` array by default (167 entries for BART). The service requests the latest version only — freshness is the agent-relevant signal, not a multi-year fetch log.
+**Feed output selects one version.** The service exposes fields from the first version in Transitland’s `feed_versions` array. The timestamp describes that record.
 
 **Geometry omitted by default.** Operator/agency coverage polygons and route/stop line geometry are large coordinate arrays with no agent decision value. Output carries a compact `place` summary (country/region/city) instead. A future `include_geometry` opt-in can add it for mapping use cases.
 
 **Routes-serving-a-stop deferred on the stop record.** Transitland doesn't return serving routes on `/stops` by default (requires an include). v1 keeps stops lean and points the agent at `find_routes` near the same coordinates. Add `served_routes` later if the round-trip proves common.
 
-**`find_feeds` requires a filter.** An unfiltered feeds query returns a global firehose. The `no_filter` contract forces at least one filter (operator/spec/search/fetch_error) so the agent gets a useful slice.
+**`find_feeds` requires a filter.** An unfiltered feeds query returns a global firehose. The `no_filter` contract forces at least one filter (`onestop_id`, operator, spec, search, or fetch state) so the agent gets a useful slice.
 
-**No prompts; two resources.** Pure data lookup — no recurring analysis template earns a prompt. Operators and feeds get resources (`transitland://operator/{onestop_id}`, `transitland://feed/{onestop_id}`) because they're durable ID-addressable entities; stops/routes are geography-discovered in bulk and get none.
+**No prompts; two data resources and a skill resource.** Operators and feeds get resources (`transitland://operator/{onestop_id}`, `transitland://feed/{onestop_id}`) because they're durable ID-addressable entities. The `transitland-guide` skill is served at `skill://transitland-guide/SKILL.md`; it carries station, service-day, alert, and feed-reuse workflows that span tools.
 
 ---
 
 ## Known Limitations
 
-- **No geocoding.** Transitland takes coordinates/bbox only. Place-name resolution is delegated to `openstreetmap_geocode`. An agent that passes a city name to a geography tool gets an `invalid_params` error or empty result with a geocode-first notice — by design.
+- **No geocoding.** Transitland takes coordinates/bbox only. Place-name resolution is delegated to `openstreetmap_search_places`. An agent that passes a city name to a geography tool gets an `invalid_params` error or empty result with a geocode-first notice — by design.
 - **Real-time only where GTFS-RT exists.** The vast majority of feeds are static GTFS. `get_departures` returns scheduled times for those; `realtime` is `false` and `delaySeconds` is null. The presence of a GTFS-RT feed (visible in `find_feeds` `realtimeUrls` / a `GTFS_RT` spec entry on the operator) is the prerequisite for live predictions.
-- **Departures attach to platform stops.** A parent station (location_type 1) can return zero departures; the child platform (location_type 0) carries them. Some feeds also only expose times inside their service window — confirmed during probing, where the SF Bay 511 regional feed returned no departures at several stations until queried at a leaf platform on a GTFS-RT-backed feed (NYC MTA). The empty-result notice surfaces both recoveries.
+- **Departure and alert coverage depends on the feed.** A station includes rows and alerts available from the station and its returned children. Some feeds require `use_service_window: true` to return typical-service departures outside their declared calendar.
 - **License fields are frequently blank.** Free-tier and minimal feeds leave most license fields empty in the registry. The server normalizes blanks to `unknown`/null and never infers terms. Treat `unknown` as "confirm against the license URL before redistributing," not "permissive."
 - **Feed radius search is coarse.** A feed's geometry spans its entire coverage area, so radius/bbox filtering on `/feeds` returns broad, sometimes surprising matches (an SF query surfaced a Sydney feed during probing). Discover feeds by `operator_onestop_id` for precision; the tool description says so.
 - **`served_by` filter semantics are narrow.** The stops `served_by_onestop_ids` filter expects operator/route Onestop IDs and didn't reliably match on a bare operator ID alone during probing. Pair it with geography rather than relying on it standalone.
@@ -879,7 +898,7 @@ A consolidated single-call "place profile" workflow tool was considered and **de
 |:-------|:------|
 | Base URL | `https://transit.land/api/v2/rest` (override via `TRANSITLAND_BASE_URL`) |
 | Auth | `apikey` **query parameter** (header `apikey` also accepted). **Not** an `Authorization` header. |
-| Pagination | Cursor: response `meta.after` (integer) + `meta.next` (URL — **discard, leaks apikey**). Send `after=<int>` for the next page. `limit` caps page size. |
+| Pagination | Cursor: response `meta.after` (integer) + `meta.next` (URL — **discard, leaks apikey**). Send `after=<int>` with the same filters for the next page, which may be empty. `limit` caps page size. |
 | Error envelope | JSON `{"error": "<message>"}`. Observed: 404 `{"error":"not found"}`, 401 `{"error":"Unauthorized"}`. |
 | Rate limit | Free tier limited (429 on burst); Pro raises quota. |
 
@@ -888,12 +907,13 @@ A consolidated single-call "place profile" workflow tool was considered and **de
 | Endpoint | Tool | Key params |
 |:---------|:-----|:-----------|
 | `GET /operators` | `find_operators` | `search`, `lat`,`lon`,`radius`, `bbox`, `onestop_id`, `adm0_name`, `adm1_name`, `limit`, `after` |
-| `GET /operators/{key}` | `get_operator` | path `{key}` = Onestop ID or int ID |
-| `GET /feeds` | `find_feeds` | `spec`, `search`, `fetch_error`, `feed_versions.limit=1`, `limit`, `after` (no operator filter — `operator_onestop_id` is satisfied by resolving the operator record's feeds via `GET /operators/{key}` then `GET /feeds/{key}` per feed) |
+| `GET /operators/{key}` | `get_operator` | path `{key}` = operator Onestop ID |
+| `GET /feeds` | `find_feeds` | `onestop_id` or `id`, `spec`, `search`, `fetch_error`, `limit`, `after`. Operator membership comes from `/operators/{key}`. Scoped queries use exact feed list filters or `/feeds/{key}` detail requests. |
 | `GET /feeds/{key}` | feed resource | path `{key}` |
-| `GET /routes` | `find_routes` | `lat`,`lon`,`radius`, `bbox`, `operator_onestop_id`, `onestop_id`, `route_type`, `search`, `limit`, `after` |
-| `GET /stops` | `find_stops` | `lat`,`lon`,`radius`, `bbox`, `onestop_id`, `served_by_onestop_ids`, `search`, `limit`, `after` |
-| `GET /stops/{key}/departures` | `get_departures` | path `{key}`; `next` (seconds window; both `next` and `next_seconds` accepted by the API — use `next`), `service_date`, `use_service_window`, `limit` |
+| `GET /routes` | `find_routes` | `lat`,`lon`,`radius`, `bbox`, `operator_onestop_id`, `onestop_id` or `id`, `route_type`, `search`, `limit`, `after` |
+| `GET /stops` | `find_stops` | `lat`,`lon`,`radius`, `bbox`, `onestop_id` or `id`, `served_by_onestop_ids`, `search`, `limit`, `after` |
+| `GET /stops/{id}` | `find_stops` parent resolution | path `{id}` = internal stop ID |
+| `GET /stops/{key}/departures` | `get_departures` | path `{key}`, `include_alerts=true`, `limit`, `use_service_window`, and either `next` or `service_date` with optional `start_time` and `end_time` |
 
 ### GTFS `route_type` → mode label
 
@@ -931,7 +951,7 @@ Recognized families follow the [extended GTFS route-type table](https://develope
 |:--|:--|
 | `location_type` | 0 stop · 1 station · 2 entrance · 3 node · 4 boarding area |
 | `wheelchair_boarding` / `wheelchair_accessible` | 0 unknown · 1 accessible · 2 not_accessible |
-| `schedule_relationship` | SCHEDULED · ADDED · CANCELED · UNSCHEDULED · DUPLICATED (surfaced verbatim) |
+| `schedule_relationship` | STATIC · SCHEDULED · ADDED · CANCELED · UNSCHEDULED · DUPLICATED (surfaced verbatim) |
 
 ### Onestop ID prefixes
 
@@ -950,31 +970,36 @@ The geohash segment (`9q9`) encodes location; it makes IDs roughly sortable by g
 
 | Date | Decision | Rationale |
 |:-----|:---------|:----------|
+| 2026-11-13 | Merge station and descendant departures before sorting and capping | A station can carry departures in separate platform lists. One limit over the combined chronological rows gives callers the next vehicles station-wide. |
+| 2026-11-13 | Omit `next` for an explicit service date and preserve GTFS times beyond 23:59:59 | The upstream current-time window can override the requested date. GTFS times after calendar midnight still belong to the requested service day. |
+| 2026-11-13 | Return stop-tree alerts separately from each trip's alerts | Stop access and trip disruptions have different scopes. An entrance alert can apply even when there are no departures. |
+| 2026-11-13 | Require operator Onestop IDs and verify detail identities | A numeric operator key can yield an unrelated upstream record. |
+| 2026-11-13 | Resolve parent links from embedded Onestop IDs, the current page, then bounded detail lookups | Internal-only parent references otherwise leave usable platform and entrance records without station links. Optional lookup failures preserve the page. |
 | 2026-10-13 | Preserve missing stop coordinates and route types as null; render missing modes as unknown | Missing upstream facts must remain distinct from genuine zero coordinates and bus routes. |
 | 2026-10-13 | Replace exact-zero query latitude/longitude with positive 1e-9 degrees at URL serialization | Transitland treats zero as an absent point filter. Bounded controls verified this adjustment restores filtering on stops, routes, and operators; it shifts each axis by at most about 0.112 mm, preserves all nonzero values and output coordinates, and makes no broader operator-proximity guarantee. Radius zero remains an approximation. |
 | 2026-10-13 | Normalize recognized feed-spec case and underscore/hyphen variants before enum validation | API output such as GTFS_RT can be reused as input; invalid values still reject before upstream work. |
 | 2026-06-13 | Six REST-shaped tools mirroring the operator→feed→route→stop→departure hierarchy | The hierarchy is the user's mental model; no aggregation or mode-consolidation needed for a single flat-contract upstream. |
-| 2026-06-13 | Surface Onestop IDs everywhere; accept Onestop or internal int IDs on input | Onestop IDs are stable, public, legible across deployments; internal integers are instance-mutable and meaningless across instances. |
+| 2026-06-13 | Surface Onestop IDs. Accept internal IDs for feed, route, stop, and departure lookups | Onestop IDs are stable, public, legible across deployments; internal integers are instance-mutable and meaningless across instances. |
 | 2026-06-13 | `find_feeds` is the lead capability; license normalized to yes/no/unknown, never inferred | The open-data catalog (fetch URL + license + freshness) is unique to Transitland in the fleet; blank registry fields must read as "unknown," not fabricated permissive terms. |
 | 2026-06-13 | `get_departures` sets per-departure `realtime` + `schedule_relationship` + top-level `realtimeAvailable` | A scheduled time and a GTFS-RT prediction are indistinguishable to an agent unless the server marks them; confirmed `estimated`/`estimated_delay` present-iff-RT against NYC MTA live data. |
-| 2026-06-13 | Name `openstreetmap_geocode` as a pre-step for geographic queries | Transitland takes coordinates rather than place names; direct operator/route/stop name searches need no geocoding. |
+| 2026-06-13 | Name `openstreetmap_search_places` as a pre-step for geographic queries | Transitland takes coordinates rather than place names; direct operator/route/stop name searches need no geocoding. |
 | 2026-06-13 | Direct HTTP client, no SDK | No maintained TS SDK exists; the REST surface is a few GETs with flat query params — a direct client is simpler and dependency-free. |
 | 2026-06-13 | Never surface `meta.next`; return only the integer `after` cursor | The `meta.next` URL embeds the apikey in plaintext (verified) — leaking it to the client/logs is a credential exposure. |
-| 2026-06-13 | Slice feeds to the latest `feed_version` (`feed_versions.limit=1`) | Default response returns the entire version history (167 entries for BART); only current freshness is agent-relevant. |
+| 2026-06-13 | Expose the first returned feed version in feed output | The API can return full history (167 entries for BART). The feed record exposes the selected version’s recorded fetch time and calendar coverage. |
 | 2026-06-13 | Omit geometry (coverage polygons, route/stop lines); surface a compact place summary | Large coordinate arrays with no agent decision value; a country/region/city summary is enough. A future `include_geometry` opt-in can add it. |
 | 2026-06-13 | Fold route/stop `get` into `find` with an `onestop_id` filter; keep `get` only for operators (+ feed/operator resources) | A route/stop is discovered in bulk by geography and its find-output already carries the full record; operators/feeds are durable ID-first entities worth a dedicated fetch + resource. |
 | 2026-06-13 | `find_feeds` requires ≥1 filter (`no_filter` contract) | An unfiltered feeds query is a global firehose; forcing a filter yields a useful paginated slice. |
 | 2026-06-13 | Truncation fields (`truncated`/`shown`/`cap`) in `enrichment`, optional; `totalCount` always via `ctx.enrich.total()` | The framework only populates truncation fields when the cap is hit — declaring them required throws -32007 on every non-truncated result; `totalCount` is the always-present honest-disclosure field that satisfies `capped-list-no-truncation`. |
-| 2026-06-13 | Empty results (no operators / no departures) return data + `ctx.enrich.notice`, not an error | "Nothing here" is a valid answer; the notice carries the actionable recovery (geocode-first, widen window, child platform) without forcing an error path. |
+| 2026-06-13 | Empty results (no operators / no departures) return data + `ctx.enrich.notice`, not an error | "Nothing here" is a valid answer; the notice carries the actionable recovery (first-page query guidance, departure window guidance, or continuation status) without forcing an error path. |
 | 2026-06-13 | Defer a consolidated "place profile" workflow tool | A 4–5-call fan-out with branchy failure modes; the chain is already legible from individual tools. Revisit if agents assemble it by hand repeatedly. |
 | 2026-06-13 | Defer `served_routes` on the stop record | Transitland requires an include for serving routes on `/stops`; v1 keeps stops lean and points at `find_routes`. Add if the round-trip proves common. |
 | 2026-06-13 | Display identity is the hyphenated machine name `transitland-mcp-server` (createApp `title`, manifest `display_name`) | Fleet identity rule — humans and agents both see the machine name; never Title Case. |
 | 2026-06-13 | GraphQL endpoint (`/api/v2/query`) documented as an out-of-scope escape hatch | REST serves the tool-shaped queries; deep nested joins drop to GraphQL, but the MCP surface stays REST-shaped. |
-| 2026-06-13 | `schedule_relationship` values are `STATIC` (no RT) and `SCHEDULED` (RT overlay), plus mutation states `ADDED`/`CANCELED`/`UNSCHEDULED`/`DUPLICATED` | Verified against NYC MTA GTFS-RT feed. `STATIC` (not `SCHEDULED`) is the common value for non-RT trips — distinguishing `STATIC` vs `SCHEDULED` is the primary RT indicator, confirmed from live API. |
-| 2026-06-13 | `GET /stops/{key}/departures` returns HTTP 200 + `{"stops":[]}` for nonexistent stops — not a 404 | Verified with `s-INVALID-notexist`. The `stop_not_found` error must be detected by the handler from the empty stops array, not from an HTTP error code. Empty stops array on a well-formed input ID = not-found; on an unformatted/invalid ID = validation error. |
+| 2026-06-13 | Preserve the upstream `schedule_relationship` value | Keep trip states such as `ADDED` and `CANCELED` visible independently of whether the row carries an estimated time. |
+| 2026-06-13 | `GET /stops/{key}/departures` returns HTTP 200 + `{"stops":[]}` for nonexistent stops | Raise `stop_not_found` for an empty stop array. A returned stop with no departures is a successful empty result. |
 | 2026-06-13 | `no_filter` contracts on operators/routes/stops/feeds are server-enforced guards, not API behavior | The upstream API accepts unfiltered requests on all endpoints (verified). The guards exist to prevent global dumps and force agents toward useful, scoped queries. |
-| 2026-06-13 | The API accepts both `next` and `next_seconds` as the departures look-ahead parameter; use `next` in the service layer | Both param names work against the live API. Tool input is `next_seconds` (descriptive) but the service layer sends `next` (canonical API param). |
-| 2026-06-14 | `GET /feeds` has NO operator filter (field-test finding); `find_feeds` resolves `operator_onestop_id` by fetching the operator record's feed Onestop IDs, then each feed by `onestop_id` | Verified against the live API and the official `/feeds` docs: `operator_onestop_id` (and every operator-scoping variant) is silently ignored — the param is dropped and the unfiltered global feed list returned. The operator→feeds relationship lives only on the operator record (`operator.feeds[]`), whose refs are sparse (`onestop_id`/`spec`/`name`, no license/urls), so each resolved feed is re-fetched via `GET /feeds/{key}` for the full license/url/freshness payload. `spec` narrows the resolved set client-side; `search`/`fetch_error`/`after` don't apply to it. |
+| 2026-06-13 | The API accepts both `next` and `next_seconds` as the departures look-ahead parameter; use `next` in the service layer | Both param names work against the live API. Tool input is `next_seconds` (descriptive) and current-time requests send `next`. Explicit service-date requests omit it. |
+| 2026-06-14 | Derive operator feed membership from `operator.feeds[]` | `/feeds` does not implement operator scope. Resolve the operator’s feed references, apply spec there, and fetch details or exact filtered matches for the selected feeds. |
 | 2026-06-14 | Single-record 404s (`GET /operators/{key}`, `GET /feeds/{key}`) carry the caller's contract reason + a clean ID-named message (field-test finding) | Verified: an absent operator/feed key returns HTTP 404 + `{"error":"not found"}` (NOT a 200 + empty array — only `/departures` does that). The service's `classifyFetchError` was producing a generic `notFound` that leaked the endpoint path and dropped the declared `operator_not_found`/`feed_not_found` reason, making those contract entries dead. The 404 path now threads the contract reason + recovery and names the caller's ID, never the internal path. |
 
 ---
@@ -988,7 +1013,7 @@ The geohash segment (`9q9`) encodes location; it makes IDs roughly sortable by g
 | # | Area | Finding | Fix |
 |:--|:-----|:--------|:----|
 | 1 | Verified Response Shapes — Departures | `schedule_relationship` comment listed `SCHEDULED | ADDED | CANCELED | UNSCHEDULED | DUPLICATED` but omitted `STATIC`. Live API returns `STATIC` for all non-RT static-schedule trips; `SCHEDULED` for RT-covered trips. `STATIC` is the most common value in any feed without GTFS-RT. | Added `STATIC` to the enum comment in the response shape. |
-| 2 | Tool Specs — `get_departures` real-time note | The "The real-time test" paragraph mentioned `CANCELED`/`ADDED` as surfaced relationships but gave no explanation of `STATIC` vs `SCHEDULED` — which is the actual primary RT indicator. Implementors would have built the wrong classifier. | Rewrote the real-time paragraph to explain `STATIC` = no RT overlay, `SCHEDULED` = RT active. |
+| 2 | Tool Specs — `get_departures` real-time note | `scheduleRelationship` and real-time prediction availability are distinct upstream signals. | Document the presence of an estimated departure time as the source of `realtime`. |
 | 3 | Tool Specs — `get_departures` output schema | `scheduleRelationship` described as `SCHEDULED, ADDED, CANCELED, UNSCHEDULED, or DUPLICATED` — wrong, `STATIC` was absent. | Updated `.describe()` text to list all six observed values with correct semantics. |
 | 4 | Tool Specs — `get_departures` error contract (`stop_not_found`) | The error's `when` clause implied it triggers on a 404. The API returns HTTP 200 + `{"stops":[]}` for nonexistent stops (verified: `s-INVALID-notexist` → `{"stops":[]}` with HTTP 200). An implementation watching for a 404 would never throw `stop_not_found` — all invalid stop IDs would silently return empty departures. | Rewrote `when` clause to name the HTTP 200 + empty-array behavior, and added an IMPLEMENTATION NOTE explaining the detection strategy. |
 | 5 | Tool Specs — `find_feeds` `spec` | API output uses uppercase specs such as `GTFS_RT`, while handlers use canonical lowercase values. | Case-fold and replace underscores with hyphens before enum validation; publish a string input schema that accepts the advertised variants. Unknown values still reject. |
@@ -1005,7 +1030,7 @@ The geohash segment (`9q9`) encodes location; it makes IDs roughly sortable by g
 - **Error shapes** — `{"error":"Unauthorized"}` (401) and `{"error":"not found"}` (404) verified for operator/feed GET endpoints.
 - **`served_by_onestop_ids` param name** — verified correct for stops endpoint.
 - **`operator_onestop_id` param for routes** — verified: correct param name, returns results.
-- **`feed_versions.limit=1` efficiency** — response shape confirmed: the default returns full history (167 entries for BART); slicing to 1 is correct.
+- **Feed version selection** — feed output includes the first version record returned by the API.
 - **`spec` accepts lowercase and uppercase** — recognized inputs normalize to the lowercase canonical enum before validation; the advertised string schema permits uppercase API-output forms such as `GTFS_RT`.
 - **Tool count and resource count** — 6 tools (including `get_operator`), 2 resources. Design says "All six tools" in the services section; count is accurate.
 - **Geocode-delegation to openstreetmap** — correct; Transitland does not geocode place names (verified: no geocoding param exists on any endpoint).
