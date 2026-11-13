@@ -1,6 +1,6 @@
 # transitland-mcp-server - Directory Structure
 
-Generated on: 2026-11-13 16:14:59
+Generated on: 2026-11-13 16:33:34
 
 ```text
 transitland-mcp-server/
@@ -26,6 +26,7 @@ transitland-mcp-server/
 ├── changelog/
 │   ├── 0.1.x/
 │   ├── 0.2.x/
+│   ├── 0.3.x/
 │   └── template.md
 ├── docs/
 │   └── design.md
