@@ -563,6 +563,7 @@ describe('transitland_find_stops', () => {
     name: 'Powell',
     code: null,
     platformCode: null,
+    stopId: null,
     description: null,
     lat: 37.78459,
     lon: -122.40737,
@@ -620,7 +621,13 @@ describe('transitland_get_departures', () => {
     estimatedTime: '2026-06-13T17:01:39-04:00',
     delaySeconds: 2432,
     serviceDate: '2026-06-13',
-    platform: { onestopId: 's-1', code: null },
+    platform: {
+      onestopId: 's-1',
+      code: null,
+      stopId: null,
+      feedOnestopId: null,
+      internalStopId: null,
+    },
     headsign: '14 ST via 7 AV',
     route: {
       onestopId: 'r-dr72h-m7',
@@ -722,7 +729,13 @@ describe('transitland_get_departures', () => {
     const departure = {
       ...rtDeparture,
       serviceDate: '2026-06-12',
-      platform: { onestopId: 's-platform', code: '2' },
+      platform: {
+        onestopId: 's-platform',
+        code: '2',
+        stopId: null,
+        feedOnestopId: null,
+        internalStopId: null,
+      },
       alerts: [tripAlert],
     };
     service.getDepartures.mockResolvedValueOnce({

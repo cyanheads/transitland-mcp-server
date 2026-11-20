@@ -103,6 +103,7 @@ describe('definition smoke test', () => {
           name: 'Powell St',
           code: null,
           platformCode: null,
+          stopId: null,
           description: null,
           lat: 37.784,
           lon: -122.408,
@@ -132,7 +133,13 @@ describe('definition smoke test', () => {
             estimatedTime: '2026-08-21T12:01:30-07:00',
             delaySeconds: 90,
             serviceDate: '2026-08-21',
-            platform: { onestopId: 's-9q8yyw3xjw-powell', code: null },
+            platform: {
+              onestopId: 's-9q8yyw3xjw-powell',
+              code: null,
+              stopId: null,
+              feedOnestopId: null,
+              internalStopId: null,
+            },
             headsign: 'Richmond',
             route: {
               onestopId: 'r-9q9-bart-6',

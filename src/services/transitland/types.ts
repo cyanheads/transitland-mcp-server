@@ -206,8 +206,11 @@ export interface RawStopWithDepartures {
   alerts?: RawAlert[] | null;
   children?: RawStopWithDepartures[] | null;
   departures?: RawDeparture[] | null;
+  feed_version?: RawFeedVersionRef | null;
+  id?: number | null;
   onestop_id?: string | null;
   platform_code?: string | null;
+  stop_id?: string | null;
   stop_name?: string | null;
   stop_timezone?: string | null;
 }
@@ -341,6 +344,7 @@ export interface StopRecord {
     region: string | null;
   };
   platformCode: string | null;
+  stopId: string | null;
   timezone: string | null;
   wheelchairBoarding: WheelchairState;
 }
@@ -362,7 +366,13 @@ export interface DepartureRecord {
   estimatedTime: string | null;
   headsign: string | null;
   operatorName: string | null;
-  platform: { onestopId: string | null; code: string | null };
+  platform: {
+    onestopId: string | null;
+    code: string | null;
+    stopId: string | null;
+    feedOnestopId: string | null;
+    internalStopId: number | null;
+  };
   realtime: boolean;
   route: {
     onestopId: string;

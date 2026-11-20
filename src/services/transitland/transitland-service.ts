@@ -224,6 +224,7 @@ function normalizeStop(raw: RawStop, parents: ReadonlyMap<number, string>): Stop
     onestopId: blankToNull(raw.onestop_id) ?? '',
     name: blankToNull(raw.stop_name),
     code: blankToNull(raw.stop_code),
+    stopId: blankToNull(raw.stop_id),
     platformCode: blankToNull(raw.platform_code),
     description: blankToNull(raw.stop_desc),
     lat: coords?.[1] ?? null,
@@ -851,24 +852,24 @@ export class TransitlandService {
     key: string,
     params: Record<string, QueryValue>,
     ctx: Context,
-  ): Promise<{ found: false } | { found: true; result: DeparturesResult }> {
+  ): Promise<
+    | { found: false }
+    | { found: true; result: DeparturesResult; truncated: boolean; childCapReached: boolean }
+  > {
+    const limit = typeof params.limit === 'number' ? params.limit : undefined;
     const body = await this.request<{ stops?: RawStopWithDepartures[] }>(
-      `/stops/${encodeURIComponent(key)}/departures`,
-      { ...params, include_alerts: true },
+      `/stops/${encodeURIComponent(key).replaceAll('%3A', ':')}/departures`,
+      { ...params, limit: limit === undefined ? undefined : limit + 1, include_alerts: true },
       ctx,
       'transitland.getDepartures',
     );
-    const stop = body.stops?.[0];
+    const [stop, ...otherStops] = body.stops ?? [];
     if (!stop) {
       return { found: false };
     }
     return {
       found: true,
-      result: assembleDepartures(
-        stop,
-        key,
-        typeof params.limit === 'number' ? params.limit : undefined,
-      ),
+      ...assembleDepartures(stop, otherStops, key, limit),
     };
   }
 }

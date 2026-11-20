@@ -96,16 +96,17 @@ The geography tools accept `bbox` in `minLon,minLat,maxLon,maxLat` order. Longit
 
 - Filter by `lat`+`lon`+`radius` (max 10,000m, default 500m), `bbox`, `onestop_id`, `served_by_onestop_ids` (comma-separated operator/route Onestop IDs), or stop-name `search` — at least one required. Name searches need no geocoding
 - `onestop_id` also accepts an internal stop ID as a string and combines with other filters.
-- Returns location type, coordinates, accessibility, timezone, and source feed Onestop ID, plus separate stop code, platform code, and description fields when published.
+- Returns location type, coordinates, accessibility, timezone, and source feed Onestop ID, plus separate GTFS stop ID, public stop code, platform code, and description fields when published.
 - Use a station ID or a stop's `parentOnestopId` for station-wide departures. A platform ID scopes the lookup to that platform.
 
 ---
 
 ### `transitland_get_departures` <sub>tool</sub>
 
-- Find a stop or station with `transitland_find_stops`, then pass its Onestop ID as `stop_key`. An internal stop ID also works. An unknown stop returns `stop_not_found`.
+- Find a stop or station with `transitland_find_stops`, then pass its Onestop ID as `stop_key`. For a specific feed's record, use `<feedOnestopId>:<stopId>`. An internal stop ID also works. An unknown stop returns `stop_not_found`.
 - `next_seconds` sets the window from now (60–86,400 seconds, default 3,600). Set `service_date` to start at the service day's first departure, or add `start_time` in GTFS `HH:MM:SS` to start a `next_seconds` window at that time. GTFS hours can exceed 23. Set `use_service_window: true` to allow a typical-service fallback.
-- Station results include departures from the station and its returned children, ordered by estimated time when available and scheduled time otherwise, with a single limit. Each row identifies the boarding location in `platform` and carries the upstream `serviceDate` when available.
+- Departures from all matching stop records and their returned descendants share one time-ordered limit. Each row lists the boarding location's Onestop ID, internal stop ID, GTFS stop ID, and source feed in `platform` when available.
+- A notice flags possible gaps when any station reaches Transitland's 100-child limit. Query a platform directly if it may be missing. When the departure limit cuts the results, raise it up to 100 or narrow the departure window.
 - Each departure includes its route, trip, headsign, scheduled and estimated times, delay, `realtime`, and `scheduleRelationship`. `realtimeAvailable` is true when a returned row carries a live prediction.
 - Top-level `alerts` cover the queried stop and its returned children, including entrances. A departure's optional `alerts` cover that trip. Stop alerts can be present on an empty departure list.
 

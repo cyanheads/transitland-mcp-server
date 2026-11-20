@@ -91,17 +91,22 @@ function departureInstant(time: RawDepartureTime | null | undefined): number {
 /** Merge station and descendant records before applying the caller’s departure limit. */
 export function assembleDepartures(
   stop: RawStopWithDepartures,
+  otherStops: RawStopWithDepartures[],
   key: string,
   limit: number | undefined,
-): DeparturesResult {
+): { result: DeparturesResult; truncated: boolean; childCapReached: boolean } {
   const alerts: AlertRecord[] = [];
   const seen = new Set<string>();
   const rows: { raw: RawDeparture; platform: DepartureRecord['platform']; instant: number }[] = [];
-  const pending = [stop];
+  const pending = [stop, ...otherStops].reverse();
+  let childCapReached = false;
   for (let source = pending.pop(); source !== undefined; source = pending.pop()) {
     const platform = {
       onestopId: blankToNull(source.onestop_id) ?? (source === stop ? key : null),
       code: blankToNull(source.platform_code),
+      stopId: blankToNull(source.stop_id),
+      feedOnestopId: blankToNull(source.feed_version?.feed?.onestop_id),
+      internalStopId: source.id ?? null,
     };
     for (const raw of source.departures ?? []) {
       rows.push({ raw, platform, instant: departureInstant(raw.departure) });
@@ -114,20 +119,26 @@ export function assembleDepartures(
       }
       alerts.push(normalizeAlert(alert));
     }
-    for (const child of source.children?.toReversed() ?? []) pending.push(child);
+    const children = source.children ?? [];
+    if (children.length >= 100) childCapReached = true;
+    for (const child of children.toReversed()) pending.push(child);
   }
   rows.sort((a, b) => a.instant - b.instant);
   const departures = rows
     .slice(0, limit)
     .map(({ raw, platform }) => normalizeDeparture(raw, platform));
   return {
-    stop: {
-      onestopId: blankToNull(stop.onestop_id) ?? key,
-      name: blankToNull(stop.stop_name),
-      timezone: blankToNull(stop.stop_timezone),
+    truncated: limit !== undefined && rows.length > limit,
+    childCapReached,
+    result: {
+      stop: {
+        onestopId: blankToNull(stop.onestop_id) ?? key,
+        name: blankToNull(stop.stop_name),
+        timezone: blankToNull(stop.stop_timezone),
+      },
+      alerts,
+      departures,
+      realtimeAvailable: departures.some((departure) => departure.realtime),
     },
-    alerts,
-    departures,
-    realtimeAvailable: departures.some((departure) => departure.realtime),
   };
 }

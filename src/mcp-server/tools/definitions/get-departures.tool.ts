@@ -74,7 +74,7 @@ export const getDeparturesTool = tool('transitland_get_departures', {
       .string()
       .min(1)
       .describe(
-        'Stop, station, or platform Onestop ID (e.g. "s-9q8yyw3xjw-powell") or internal integer ID. Find it with transitland_find_stops.',
+        'Stop, station, or platform Onestop ID (e.g. "s-9q8yyw3xjw-powell"), internal integer ID, or feed-scoped key <feedOnestopId>:<stopId>. Find the IDs with transitland_find_stops.',
       ),
     next_seconds: z
       .number()
@@ -162,6 +162,21 @@ export const getDeparturesTool = tool('transitland_get_departures', {
                   .nullable()
                   .describe('Onestop ID of the stop or platform supplying this departure.'),
                 code: z.string().nullable().describe('Platform code when published.'),
+                internalStopId: z
+                  .number()
+                  .int()
+                  .nullable()
+                  .describe(
+                    'Transitland internal ID of the source stop. Pass as a string to look up that specific record.',
+                  ),
+                stopId: z
+                  .string()
+                  .nullable()
+                  .describe('GTFS stop_id of the source stop or platform.'),
+                feedOnestopId: z
+                  .string()
+                  .nullable()
+                  .describe('Onestop ID of the GTFS feed supplying this departure.'),
               })
               .describe('Boarding location for this departure.'),
             alerts: z
@@ -234,7 +249,10 @@ export const getDeparturesTool = tool('transitland_get_departures', {
     truncated: z.boolean().optional().describe('True when departures were capped at the limit.'),
     shown: z.number().optional().describe('Number of departures returned.'),
     cap: z.number().optional().describe('The limit applied.'),
-    notice: z.string().optional().describe('Guidance when no departures were found.'),
+    notice: z
+      .string()
+      .optional()
+      .describe('Coverage, result limits, or guidance for an empty window.'),
   },
   errors: [
     {
@@ -295,16 +313,25 @@ export const getDeparturesTool = tool('transitland_get_departures', {
       });
     }
 
-    const { result } = response;
+    const { result, truncated, childCapReached } = response;
+    const notices: string[] = [];
     ctx.enrich.total(result.departures.length);
-    if (result.departures.length >= limit) {
-      ctx.enrich.truncated({ shown: result.departures.length, cap: limit });
+    if (input.limit > limit) {
+      notices.push(`Requested ${input.limit} departures; applied the ${limit}-result cap.`);
     }
-    const capNotice =
-      input.limit > limit
-        ? `Requested ${input.limit} departures; applied the ${limit}-result cap. Narrow the service date or look-ahead window for a smaller set. `
-        : '';
-    if (capNotice) ctx.enrich.notice(capNotice.trimEnd());
+    if (truncated) {
+      ctx.enrich.truncated({ shown: result.departures.length, cap: limit });
+      notices.push(
+        limit < 100
+          ? 'Raise limit up to 100 to see more departures.'
+          : 'Narrow the departure window to see more departures within the 100-result cap.',
+      );
+    }
+    if (childCapReached) {
+      notices.push(
+        "Transitland returns at most 100 child stops per station, including non-platform records. Departures from additional platforms may be missing. Query a platform's own Onestop ID for its departures.",
+      );
+    }
     if (result.departures.length === 0) {
       const window = service_date
         ? start_time
@@ -314,8 +341,9 @@ export const getDeparturesTool = tool('transitland_get_departures', {
       const fallback = input.use_service_window
         ? ''
         : ' Set use_service_window=true to allow a typical-service fallback.';
-      ctx.enrich.notice(`${capNotice}No departures ${window}${fallback}`);
+      notices.push(`No departures ${window}${fallback}`);
     }
+    if (notices.length > 0) ctx.enrich.notice(notices.join(' '));
     ctx.log.info('get_departures resolved', {
       stopKey: input.stop_key,
       count: result.departures.length,
@@ -355,6 +383,10 @@ export const getDeparturesTool = tool('transitland_get_departures', {
       lines.push(
         `**Platform:** ${formatValue(dep.platform.onestopId)} · **Platform code:** ${formatValue(dep.platform.code)}`,
       );
+      lines.push(
+        `**GTFS stop ID:** ${formatValue(dep.platform.stopId)} · **Feed:** ${formatValue(dep.platform.feedOnestopId)}`,
+      );
+      lines.push(`**Internal stop ID:** ${dep.platform.internalStopId ?? 'Not available'}`);
       lines.push(
         `**Delay:** ${dep.delaySeconds == null ? 'Not available' : `${dep.delaySeconds}s`}`,
       );

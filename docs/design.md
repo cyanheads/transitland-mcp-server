@@ -668,6 +668,7 @@ z.object({
 z.object({
   stops: z.array(z.object({
     onestopId: z.string().describe('Stable public Onestop ID (e.g. "s-9q8yyw3xjw-powell"). Pass to transitland_get_departures.'),
+    stopId: z.string().nullable().describe('GTFS stop_id in the source feed. Combine feedOnestopId and stopId as <feedOnestopId>:<stopId> for a feed-scoped departure lookup.'),
     name: z.string().nullable().describe('Stop/station name. Null for unnamed generic nodes (location_type 3).'),
     code: z.string().nullable().describe('Public stop code printed on signage, when published. Null otherwise.'),
     platformCode: z.string().nullable().describe('Platform code when published.'),
@@ -714,14 +715,14 @@ errors: [
 
 ### `transitland_get_departures`
 
-**Description:** Get departures and service alerts for a stop or station by Onestop or internal stop ID. Station results merge direct and child departures, sort by estimated departure instant when available and scheduled instant otherwise, then apply one global limit. Untimed rows follow timed rows and ties preserve upstream order. The platform, service date, prediction, and schedule relationship are carried per row.
+**Description:** Get departures and service alerts by Onestop ID, internal stop ID, or a feed-scoped `<feedOnestopId>:<stopId>` key. Results merge departures from all returned stop records and their descendants, sort by estimated departure instant when available and scheduled instant otherwise, then apply one global limit. Untimed rows follow timed rows and ties preserve upstream order. Each row carries its source platform, service date, prediction, and schedule relationship.
 
 **Input schema:**
 
 ```ts
 z.object({
   stop_key: z.string()
-    .describe('Stop, station, or platform Onestop ID (e.g. "s-9q8yyw3xjw-powell") or internal integer ID. Get one from transitland_find_stops.'),
+    .describe('Stop, station, or platform Onestop ID (e.g. "s-9q8yyw3xjw-powell"), internal integer ID, or feed-scoped key <feedOnestopId>:<stopId>. Find the IDs with transitland_find_stops.'),
   next_seconds: z.number().int().min(60).max(86400).default(3600)
     .describe('Window in seconds from now or from start_time. Ignored when service_date is set without start_time.'),
   service_date: z.union([
@@ -760,6 +761,9 @@ z.object({
     platform: z.object({
       onestopId: z.string().nullable().describe('Onestop ID of the stop or platform supplying this departure.'),
       code: z.string().nullable().describe('Platform code when published.'),
+      internalStopId: z.number().int().nullable().describe('Transitland internal ID of the source stop. Pass as a string to look up that specific record.'),
+      stopId: z.string().nullable().describe('GTFS stop_id of the source stop or platform.'),
+      feedOnestopId: z.string().nullable().describe('Onestop ID of the GTFS feed supplying this departure.'),
     }).describe('Boarding location for this departure.'),
     alerts: z.array(alertSchema).optional().describe('Alerts associated with this trip, when present.'),
     headsign: z.string().nullable().describe('Trip or stop headsign (the destination shown on the vehicle, e.g. "14 ST via 7 AV"). Null when omitted.'),
@@ -787,7 +791,7 @@ enrichment: {
   truncated: z.boolean().optional().describe('True when departures were capped at the limit.'),
   shown: z.number().optional().describe('Number of departures returned.'),
   cap: z.number().optional().describe('The limit applied.'),
-  notice: z.string().optional().describe('Guidance for the requested time window when no departures were found.'),
+  notice: z.string().optional().describe('Coverage, result limits, or guidance for an empty window.'),
 }
 ```
 
@@ -799,7 +803,7 @@ errors: [
     when: 'start_time is supplied without a service_date',
     recovery: 'Provide a service_date or omit start_time for departures from now.' },
   { reason: 'stop_not_found', code: JsonRpcErrorCode.NotFound,
-    when: 'The stops array in the API response is empty for the given Onestop ID or internal ID — the API returns HTTP 200 + {"stops":[]} (not a 404) when the stop does not exist. The handler must detect this from the empty stops array, not from an HTTP status.',
+    when: 'The upstream response is HTTP 200 with an empty stops array for the supplied stop key.',
     recovery: 'Verify the ID (e.g. "s-9q8yyw3xjw-powell") or locate the stop with transitland_find_stops.' },
   { reason: 'rate_limited', code: JsonRpcErrorCode.RateLimited, retryable: true,
     when: 'Transitland returned HTTP 429',
@@ -810,6 +814,8 @@ errors: [
 > **IMPLEMENTATION NOTE:** `GET /stops/{key}/departures` returns a populated stop record with an empty `departures` array when the stop exists but has no departures in the window. A completely empty `stops` array means no stop record exists and produces `stop_not_found`. The service distinguishes these response shapes in the single departures request; no pre-flight lookup or additional ID-format guard is needed.
 
 A known stop with no departures returns `departures: []`, `realtimeAvailable: false`, any stop alerts, and guidance for the requested time window. The current-time query uses `next`. An explicit service date omits `next`. When `start_time` is supplied, the request includes `end_time` computed by adding `next_seconds` without wrapping at midnight. For example, `23:00:00` plus 10,800 seconds yields `26:00:00`. Rows carry the upstream service date even after calendar midnight.
+
+The request asks for one more departure than the effective limit so the merged results report truncation only when a row is omitted. A notice warns of possible missing platforms when any returned stop reaches Transitland's 100-child cap, which includes non-platform records.
 
 **Annotations:** `readOnlyHint: true`, `openWorldHint: true`
 
@@ -913,7 +919,7 @@ A consolidated single-call "place profile" workflow tool was considered and **de
 | `GET /routes` | `find_routes` | `lat`,`lon`,`radius`, `bbox`, `operator_onestop_id`, `onestop_id` or `id`, `route_type`, `search`, `limit`, `after` |
 | `GET /stops` | `find_stops` | `lat`,`lon`,`radius`, `bbox`, `onestop_id` or `id`, `served_by_onestop_ids`, `search`, `limit`, `after` |
 | `GET /stops/{id}` | `find_stops` parent resolution | path `{id}` = internal stop ID |
-| `GET /stops/{key}/departures` | `get_departures` | path `{key}`, `include_alerts=true`, `limit`, `use_service_window`, and either `next` or `service_date` with optional `start_time` and `end_time` |
+| `GET /stops/{key}/departures` | `get_departures` | path `{key}` preserves the feed-key colon, `include_alerts=true`, `limit` one above the effective caller limit, `use_service_window`, and either `next` or `service_date` with optional `start_time` and `end_time` |
 
 ### GTFS `route_type` → mode label
 

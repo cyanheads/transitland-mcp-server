@@ -154,6 +154,106 @@ describe('real upstream tool contracts', () => {
     expect(textOf(result)).toContain('· unknown ·');
     expect(textOf(result)).toContain('· water transport ·');
   });
+  it('merges all departure roots and identifies nested source records', async () => {
+    const feed_version = { feed: { onestop_id: 'f-test' } };
+    body = {
+      stops: [
+        { onestop_id: 's-test', feed_version, departures: [{}] },
+        {
+          onestop_id: 's-test',
+          children: [
+            {
+              children: [
+                {
+                  id: 42,
+                  onestop_id: 's-platform',
+                  stop_id: '123/4',
+                  departures: [{ departure: { scheduled_utc: '2026-11-14T07:59:00Z' } }],
+                  alerts: [{ header_text: [{ text: 'Board elsewhere' }] }],
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+    const result = await runToolContract(getDeparturesTool, { stop_key: 's-test' });
+    expect(result.structuredContent).toMatchObject({
+      alerts: [{ header: 'Board elsewhere' }],
+      departures: [
+        {
+          platform: {
+            onestopId: 's-platform',
+            stopId: '123/4',
+            internalStopId: 42,
+            feedOnestopId: null,
+          },
+        },
+        { platform: { onestopId: 's-test', feedOnestopId: 'f-test' } },
+      ],
+    });
+    expect(textOf(result)).toContain('Board elsewhere');
+    expect(textOf(result)).toContain('123/4');
+    expect(textOf(result)).toContain('f-test');
+    expect(textOf(result)).toContain('**Internal stop ID:** 42');
+  });
+  it('preserves the feed-scoped key separator while encoding the stop ID', async () => {
+    body = { stops: [{}] };
+    await runToolContract(getDeparturesTool, { stop_key: 'f-test:agency:123/4' });
+    expect(requests[0]?.pathname).toBe('/stops/f-test:agency:123%2F4/departures');
+  });
+  it('exposes feed-local stop IDs separately from public codes', async () => {
+    body = { stops: [{ stop_id: 'raw-id', stop_code: 'public-code' }] };
+    const result = await runToolContract(findStopsTool, { search: 'test' });
+    expect(result.structuredContent).toMatchObject({
+      stops: [{ stopId: 'raw-id', code: 'public-code' }],
+    });
+    expect(textOf(result)).toContain('raw-id');
+    expect(textOf(result)).toContain('public-code');
+  });
+  it('warns when a descendant has 100 children, even with no departures', async () => {
+    body = {
+      stops: [
+        {
+          children: [
+            {
+              children: Array.from({ length: 100 }, () => ({
+                location_type: 3,
+              })),
+            },
+          ],
+        },
+      ],
+    };
+    const result = await runToolContract(getDeparturesTool, { stop_key: 's-test' });
+    const warning = 'Transitland returns at most 100 child stops';
+    expect(result.structuredContent).toMatchObject({
+      departures: [],
+      notice: expect.stringContaining(warning),
+    });
+    expect(result.structuredContent).not.toHaveProperty('truncated');
+    expect(textOf(result)).toContain(warning);
+    expect(textOf(result)).toContain('No departures');
+  });
+  it.each([3, 100])('distinguishes exact and truncated windows at limit %i', async (limit) => {
+    const stops = [{ children: [{ departures: Array.from({ length: limit }, () => ({})) }] }];
+    body = { stops };
+    const exact = await runToolContract(getDeparturesTool, { stop_key: 's-test', limit });
+    expect(exact.structuredContent).not.toHaveProperty('truncated');
+    expect(requests[0]?.searchParams.get('limit')).toBe(String(limit + 1));
+    expect(textOf(exact)).not.toContain('**truncated:** true');
+    stops[0]!.children[0]!.departures.push({});
+    const capped = await runToolContract(getDeparturesTool, { stop_key: 's-test', limit });
+    const guidance = limit === 100 ? 'Narrow the departure window' : 'Raise limit up to 100';
+    expect(capped.structuredContent).toMatchObject({
+      truncated: true,
+      shown: limit,
+      cap: limit,
+      notice: expect.stringContaining(guidance),
+    });
+    expect(textOf(capped)).toContain(guidance);
+    expect(textOf(capped)).toContain('**truncated:** true');
+  });
   it.each(['GTFS', 'GTFS_RT', 'gtfs_rt', 'GtFs-Rt', 'GBFS', 'MDS', 'gtfs', 'gtfs-rt'])(
     'normalizes %s before upstream work',
     async (spec) => {

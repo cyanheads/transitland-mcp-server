@@ -87,6 +87,12 @@ export const findStopsTool = tool('transitland_find_stops', {
               .string()
               .nullable()
               .describe('Stop/station name. Null for unnamed generic nodes (location_type 3).'),
+            stopId: z
+              .string()
+              .nullable()
+              .describe(
+                'GTFS stop_id in the source feed. Combine feedOnestopId and stopId as <feedOnestopId>:<stopId> for a feed-scoped departure lookup.',
+              ),
             code: z
               .string()
               .nullable()
@@ -235,6 +241,7 @@ export const findStopsTool = tool('transitland_find_stops', {
       );
       lines.push(`**Coordinates:** ${stop.lat ?? 'unknown'}, ${stop.lon ?? 'unknown'}`);
       lines.push(`**Code:** ${formatValue(stop.code)}`);
+      lines.push(`**GTFS stop ID:** ${formatValue(stop.stopId)}`);
       lines.push(`**Platform code:** ${formatValue(stop.platformCode)}`);
       lines.push(`**Description:** ${formatValue(stop.description)}`);
       lines.push(`**Wheelchair:** ${stop.wheelchairBoarding}`);

@@ -106,6 +106,7 @@ const stop = {
   name: null,
   code: null,
   platformCode: null,
+  stopId: null,
   description: null,
   lat: null,
   lon: null,
@@ -144,7 +145,13 @@ const departure = {
   estimatedTime: null,
   delaySeconds: null,
   serviceDate: null,
-  platform: { onestopId: 's-test', code: null },
+  platform: {
+    onestopId: 's-test',
+    code: null,
+    stopId: null,
+    feedOnestopId: null,
+    internalStopId: null,
+  },
   headsign: null,
   route: { onestopId: 'r-test', shortName: null, longName: null, mode: 'unknown', color: null },
   operatorName: null,
@@ -162,6 +169,7 @@ function seed(
   if (name === 'departures') {
     called.mockResolvedValue({
       found: true,
+      truncated: count === 100,
       result: {
         stop: { onestopId: 's-test', name: 'Test stop', timezone: null },
         departures: Array.from({ length: count }, () => departure),
